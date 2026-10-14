@@ -1,0 +1,6 @@
+{
+  "name": "CadenceRx — Precision Medication & Regimen Tracker",
+  "description": "Personal medication tracking workspace across daily dose logs, weekly regimen matrices, monthly adherence heatmaps, streak analytics, and refill inventory management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
