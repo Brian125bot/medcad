@@ -91,6 +91,7 @@ import {
   cancelAllScheduledNotifications,
   handleNotificationAction,
 } from '@/lib/notifications';
+import { handleSlotReminderToggle } from '@/lib/slot-reminder-toggle';
 import { medicationRepository } from '@/lib/storage/repository';
 import { StorageBenchmarkResult, StorageEngineInfo } from '@/lib/storage/database';
 
@@ -1044,48 +1045,18 @@ function CadenceRxWorkspace() {
 
   // Toggle reminder enabled/muted for a specific time slot (COR-76 / Requirement 6)
   const handleToggleSlotReminder = (medicationId: string, slotId: string) => {
-    let updatedMedication: Medication | null = null;
-    let nextVal = true;
-
-    setMedications((prev) =>
-      prev.map((m) => {
-        if (m.id !== medicationId) return m;
-        const updatedSlots = m.timeSlots.map((s) => {
-          if (s.id !== slotId) return s;
-          nextVal = s.reminderEnabled === false ? true : false;
-          return { ...s, reminderEnabled: nextVal };
-        });
-        updatedMedication = { ...m, timeSlots: updatedSlots };
-        return updatedMedication;
-      })
-    );
-
-    if (updatedMedication) {
-      const med = updatedMedication as Medication;
-      const targetSlot = med.timeSlots.find((s) => s.id === slotId);
-
-      // 1. Persist through encrypted repository (survives reload)
-      medicationRepository
-        .saveMedication(med)
-        .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
-        .catch((err) =>
-          console.error('Failed to persist slot reminder toggle in storage:', err)
-        );
-
-      // 2. Sync to Firestore if authenticated
-      if (cloudUser) {
-        saveMedicationToFirestore(cloudUser.uid, med).catch((err) =>
-          console.error('Failed to sync slot reminder toggle to cloud:', err)
-        );
-      }
-
-      // 3. User feedback
-      triggerFeedback(
-        nextVal
-          ? `Enabled reminder alert for ${med.name} (${targetSlot?.time || ''})`
-          : `Muted reminder alert for ${med.name} (${targetSlot?.time || ''})`
-      );
-    }
+    return handleSlotReminderToggle(medicationId, slotId, {
+      getMedications: () => latestMedsRef.current,
+      setMedications: (nextMeds) => {
+        latestMedsRef.current = nextMeds;
+        setMedications(nextMeds);
+      },
+      saveMedication: (med) => medicationRepository.saveMedication(med),
+      saveToFirestore: (uid, med) => saveMedicationToFirestore(uid, med),
+      updateStorageInfo: () => setStorageInfo(medicationRepository.getStorageEngineInfo()),
+      triggerFeedback,
+      cloudUserUid: cloudUser?.uid,
+    });
   };
 
   // Reminder alert actions

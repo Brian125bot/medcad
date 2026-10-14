@@ -13,8 +13,9 @@ console.log('====================================================\n');
 
 const suites = [
   { name: '1. Storage & Encryption Suite', cmd: 'node tests/medication-storage.test.mjs' },
-  { name: '2. Schema Migration & Legacy Safety Suite', cmd: 'npx tsx tests/migration.test.ts' },
-  { name: '3. Notification Engine & Alarm Regression Suite', cmd: 'npx tsx tests/notifications.test.ts' },
+  { name: '2. Schema Migration & Legacy Safety Suite', cmd: 'tsx tests/migration.test.ts' },
+  { name: '3. Notification Engine & Alarm Regression Suite', cmd: 'tsx tests/notifications.test.ts' },
+  { name: '4. Slot-Reminder Persistence & Concurrency Suite', cmd: 'tsx tests/slot-reminder-persistence.test.ts' },
 ];
 
 let allPassed = true;
