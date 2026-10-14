@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Public connection test endpoint
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Root user document
+    match /users/{userId} {
+      allow get, write: if isValidId(userId) && isOwner(userId);
+
+      // Private Medication Catalog & Inventory
+      match /medications/{medicationId} {
+        allow read, write: if isValidId(userId) && isValidId(medicationId) && isOwner(userId);
+      }
+
+      // Private Adherence Dose Logs
+      match /doseLogs/{logId} {
+        allow read, write: if isValidId(userId) && isValidId(logId) && isOwner(userId);
+      }
+
+      // Private User Settings & Sync Metadata
+      match /settings/{settingId} {
+        allow read, write: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
+      }
+    }
+  }
+}

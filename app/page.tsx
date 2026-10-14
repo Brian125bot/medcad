@@ -4,6 +4,7 @@ import React, {
   useState,
   useEffect,
   useRef,
+  useCallback,
   useSyncExternalStore,
 } from 'react';
 import {
@@ -48,6 +49,22 @@ import {
   deleteCalendarFillEvent,
   GoogleCalendarEventItem,
 } from '@/lib/google-calendar';
+import {
+  auth as firebaseAuth,
+  FirebaseUser,
+  testConnection,
+} from '@/lib/firebase';
+import {
+  subscribeToUserMedications,
+  subscribeToUserDoseLogs,
+  checkUserCloudDataState,
+  migrateLocalDataToFirestore,
+  saveMedicationToFirestore,
+  deleteMedicationFromFirestore,
+  saveDoseLogToFirestore,
+  deleteDoseLogFromFirestore,
+} from '@/lib/firestore-sync';
+import { CloudSyncStatus } from '@/components/CloudSyncStatus';
 import DailyLogView from '@/components/DailyLogView';
 import WeeklyMatrixView from '@/components/WeeklyMatrixView';
 import MonthlyAnalyticsView from '@/components/MonthlyAnalyticsView';
@@ -137,6 +154,10 @@ function CadenceRxWorkspace() {
     useState<Medication | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
 
+  const triggerFeedback = useCallback((message: string) => {
+    setFeedbackBanner(message);
+  }, []);
+
   // Google Calendar Integration State
   const [isGoogleAuthenticated, setIsGoogleAuthenticated] =
     useState<boolean>(false);
@@ -147,6 +168,13 @@ function CadenceRxWorkspace() {
     GoogleCalendarEventItem[]
   >([]);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+
+  // Firebase Cloud Data Persistence & Real-time Sync State
+  const [cloudUser, setCloudUser] = useState<FirebaseUser | null>(() => firebaseAuth.currentUser);
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [isCloudMigrating, setIsCloudMigrating] = useState<boolean>(false);
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
+  const hasAttemptedMigrationRef = useRef<boolean>(false);
 
   // Bulk Sync Progress State
   const [isBulkSyncModalOpen, setIsBulkSyncModalOpen] =
@@ -183,22 +211,101 @@ function CadenceRxWorkspace() {
   // Prevent multiple alerts within the same minute for the same slot
   const alertedSlotsSetRef = useRef<Set<string>>(new Set());
 
-  // Initialize Firebase Google Auth listener for Google Calendar
+  // Connection check on mount
   useEffect(() => {
-    const unsubscribe = initAuth(
-      (user, token) => {
+    testConnection().catch(() => {});
+  }, []);
+
+  // Initialize Firebase Auth listener for Google Calendar and Firestore Cloud Persistence
+  useEffect(() => {
+    let unsubMeds: (() => void) | null = null;
+    let unsubLogs: (() => void) | null = null;
+
+    const unsubscribeAuth = initAuth(
+      async (user, token) => {
         setIsGoogleAuthenticated(true);
         setGoogleUserEmail(user.email || user.displayName || 'Connected');
+        setCloudUser(user);
+
         listCalendarRefillEvents(token)
           .then((items) => setCalendarEvents(items))
           .catch(() => {});
+
+        // Auto-migration check: If user cloud account is new/empty, migrate local browser data
+        if (!hasAttemptedMigrationRef.current) {
+          hasAttemptedMigrationRef.current = true;
+          try {
+            setIsCloudSyncing(true);
+            const state = await checkUserCloudDataState(user.uid);
+            if (!state.hasCloudData && medications.length > 0) {
+              setIsCloudMigrating(true);
+              const migrationResult = await migrateLocalDataToFirestore(
+                user.uid,
+                medications,
+                logs,
+                user.email,
+                user.displayName
+              );
+              triggerFeedback(
+                `Migrated ${migrationResult.migratedMeds} medications and ${migrationResult.migratedLogs} logs to your Google Cloud account`
+              );
+              setIsCloudMigrating(false);
+            }
+          } catch (err: unknown) {
+            console.error('Cloud migration error:', err);
+            setCloudSyncError(
+              err instanceof Error ? err.message : 'Cloud sync initialization failed'
+            );
+          } finally {
+            setIsCloudSyncing(false);
+            setIsCloudMigrating(false);
+          }
+        }
+
+        // Set up real-time multi-device Firestore subscriptions
+        if (unsubMeds) unsubMeds();
+        if (unsubLogs) unsubLogs();
+
+        unsubMeds = subscribeToUserMedications(
+          user.uid,
+          (cloudMeds) => {
+            if (cloudMeds && cloudMeds.length > 0) {
+              setMedications(cloudMeds);
+            }
+          },
+          (err) => setCloudSyncError(err.message)
+        );
+
+        unsubLogs = subscribeToUserDoseLogs(
+          user.uid,
+          (cloudLogs) => {
+            if (cloudLogs && Object.keys(cloudLogs).length > 0) {
+              setLogs(cloudLogs);
+            }
+          },
+          (err) => setCloudSyncError(err.message)
+        );
       },
       () => {
         setIsGoogleAuthenticated(false);
         setGoogleUserEmail(null);
+        setCloudUser(null);
+        if (unsubMeds) {
+          unsubMeds();
+          unsubMeds = null;
+        }
+        if (unsubLogs) {
+          unsubLogs();
+          unsubLogs = null;
+        }
       }
     );
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubMeds) unsubMeds();
+      if (unsubLogs) unsubLogs();
+    };
   }, []);
 
   useEffect(() => {
@@ -217,10 +324,6 @@ function CadenceRxWorkspace() {
       // Ignore quota errors
     }
   }, [medications, logs, reminderSettings, snoozedReminders]);
-
-  const triggerFeedback = (message: string) => {
-    setFeedbackBanner(message);
-  };
 
   useEffect(() => {
     if (!feedbackBanner) return;
@@ -430,18 +533,49 @@ function CadenceRxWorkspace() {
       }
     }
 
+    const nowStamp = getCurrentTimestamp();
+    const newLogItem = {
+      id: key,
+      key,
+      dateKey,
+      medicationId,
+      slotId,
+      status,
+      loggedAt: nowStamp,
+      note,
+    };
+
     setLogs((prev) => ({
       ...prev,
-      [key]: {
-        key,
-        dateKey,
-        medicationId,
-        slotId,
-        status,
-        loggedAt: getCurrentTimestamp(),
-        note,
-      },
+      [key]: newLogItem,
     }));
+
+    if (cloudUser) {
+      saveDoseLogToFirestore(cloudUser.uid, newLogItem).catch((err) =>
+        console.error('Failed to sync dose log to cloud:', err)
+      );
+      if (med) {
+        const wasTaken = existingLog?.status === 'taken';
+        const willBeTaken = status === 'taken';
+        let nextUnits = med.inventory.currentUnits;
+        if (!wasTaken && willBeTaken) {
+          nextUnits = Math.max(0, med.inventory.currentUnits - doseUnits);
+        } else if (wasTaken && !willBeTaken) {
+          nextUnits = med.inventory.currentUnits + doseUnits;
+        }
+        if (nextUnits !== med.inventory.currentUnits) {
+          saveMedicationToFirestore(cloudUser.uid, {
+            ...med,
+            inventory: {
+              ...med.inventory,
+              currentUnits: nextUnits,
+            },
+          }).catch((err) =>
+            console.error('Failed to sync medication units to cloud:', err)
+          );
+        }
+      }
+    }
 
     // Dismiss any active alert or snooze for this dose
     setActiveAlerts((prev) => prev.filter((a) => a.doseKey !== key));
@@ -470,6 +604,7 @@ function CadenceRxWorkspace() {
     const doseUnits = slot?.doseUnits || 1;
 
     if (existingLog.status === 'taken' && med) {
+      const restoredUnits = med.inventory.currentUnits + doseUnits;
       setMedications((prev) =>
         prev.map((m) =>
           m.id === medicationId
@@ -477,12 +612,23 @@ function CadenceRxWorkspace() {
                 ...m,
                 inventory: {
                   ...m.inventory,
-                  currentUnits: m.inventory.currentUnits + doseUnits,
+                  currentUnits: restoredUnits,
                 },
               }
             : m
         )
       );
+      if (cloudUser) {
+        saveMedicationToFirestore(cloudUser.uid, {
+          ...med,
+          inventory: {
+            ...med.inventory,
+            currentUnits: restoredUnits,
+          },
+        }).catch((err) =>
+          console.error('Failed to restore medication units in cloud:', err)
+        );
+      }
     }
 
     setLogs((prev) => {
@@ -490,6 +636,12 @@ function CadenceRxWorkspace() {
       delete next[key];
       return next;
     });
+
+    if (cloudUser) {
+      deleteDoseLogFromFirestore(cloudUser.uid, key).catch((err) =>
+        console.error('Failed to delete dose log in cloud:', err)
+      );
+    }
 
     if (med) {
       triggerFeedback(`Reverted log for ${med.name}`);
@@ -509,14 +661,22 @@ function CadenceRxWorkspace() {
         unitDeductions[inst.medication.id] =
           (unitDeductions[inst.medication.id] || 0) + inst.slot.doseUnits;
       }
-      nextLogs[inst.key] = {
+      const newLog = {
         key: inst.key,
+        id: inst.key,
         dateKey: inst.dateKey,
         medicationId: inst.medication.id,
         slotId: inst.slot.id,
-        status: 'taken',
+        status: 'taken' as const,
         loggedAt: nowStamp,
       };
+      nextLogs[inst.key] = newLog;
+
+      if (cloudUser) {
+        saveDoseLogToFirestore(cloudUser.uid, newLog).catch((err) =>
+          console.error('Failed to sync block dose log to cloud:', err)
+        );
+      }
     }
 
     setLogs(nextLogs);
@@ -524,11 +684,23 @@ function CadenceRxWorkspace() {
       prev.map((m) => {
         const deduct = unitDeductions[m.id];
         if (!deduct) return m;
+        const updatedUnits = Math.max(0, m.inventory.currentUnits - deduct);
+        if (cloudUser) {
+          saveMedicationToFirestore(cloudUser.uid, {
+            ...m,
+            inventory: {
+              ...m.inventory,
+              currentUnits: updatedUnits,
+            },
+          }).catch((err) =>
+            console.error('Failed to sync block medication deduction to cloud:', err)
+          );
+        }
         return {
           ...m,
           inventory: {
             ...m.inventory,
-            currentUnits: Math.max(0, m.inventory.currentUnits - deduct),
+            currentUnits: updatedUnits,
           },
         };
       })
@@ -570,29 +742,34 @@ function CadenceRxWorkspace() {
 
   const handleRefillMedication = (medicationId: string, addedUnits: number) => {
     const med = medications.find((m) => m.id === medicationId);
+    if (!med) return;
+
+    const updatedMed: Medication = {
+      ...med,
+      inventory: {
+        ...med.inventory,
+        currentUnits: med.inventory.currentUnits + addedUnits,
+        capacityUnits: Math.max(
+          med.inventory.capacityUnits,
+          med.inventory.currentUnits + addedUnits
+        ),
+        lastRefilledAt: todayKey,
+      },
+    };
+
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId
-          ? {
-              ...m,
-              inventory: {
-                ...m.inventory,
-                currentUnits: m.inventory.currentUnits + addedUnits,
-                capacityUnits: Math.max(
-                  m.inventory.capacityUnits,
-                  m.inventory.currentUnits + addedUnits
-                ),
-                lastRefilledAt: todayKey,
-              },
-            }
-          : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
-    if (med) {
-      triggerFeedback(
-        `Added +${addedUnits} units to ${med.name} cabinet inventory`
+
+    if (cloudUser) {
+      saveMedicationToFirestore(cloudUser.uid, updatedMed).catch((err) =>
+        console.error('Failed to sync refill to cloud:', err)
       );
     }
+
+    triggerFeedback(
+      `Added +${addedUnits} units to ${med.name} cabinet inventory`
+    );
   };
 
   const handleSaveMedication = (savedMed: Medication) => {
@@ -603,20 +780,42 @@ function CadenceRxWorkspace() {
       }
       return [...prev, savedMed];
     });
+
+    if (cloudUser) {
+      saveMedicationToFirestore(cloudUser.uid, savedMed).catch((err) =>
+        console.error('Failed to save medication to cloud:', err)
+      );
+    }
+
     triggerFeedback(`Saved ${savedMed.name} (${savedMed.strength}) to regimen`);
   };
 
   const handleToggleActiveMedication = (medicationId: string) => {
+    const target = medications.find((m) => m.id === medicationId);
+    if (!target) return;
+
+    const updatedMed: Medication = {...target, active: !target.active};
     setMedications((prev) =>
-      prev.map((m) =>
-        m.id === medicationId ? {...m, active: !m.active} : m
-      )
+      prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
+
+    if (cloudUser) {
+      saveMedicationToFirestore(cloudUser.uid, updatedMed).catch((err) =>
+        console.error('Failed to toggle active medication in cloud:', err)
+      );
+    }
   };
 
   const handleDeleteMedication = (medicationId: string) => {
     const target = medications.find((m) => m.id === medicationId);
     setMedications((prev) => prev.filter((m) => m.id !== medicationId));
+
+    if (cloudUser) {
+      deleteMedicationFromFirestore(cloudUser.uid, medicationId).catch((err) =>
+        console.error('Failed to delete medication from cloud:', err)
+      );
+    }
+
     if (target) {
       triggerFeedback(`Removed ${target.name} from regimen`);
     }
@@ -1190,6 +1389,63 @@ function CadenceRxWorkspace() {
     }
   };
 
+  // --- Firebase Cloud Data Persistence Handlers ---
+  const handleCloudSignIn = async () => {
+    setIsCloudSyncing(true);
+    setCloudSyncError(null);
+    try {
+      const res = await googleSignIn();
+      if (res?.user) {
+        setCloudUser(res.user);
+        setIsGoogleAuthenticated(true);
+        setGoogleUserEmail(res.user.email || res.user.displayName || 'Connected');
+        triggerFeedback(`Connected to Google Cloud: ${res.user.email || 'Ready'}`);
+      }
+    } catch (err: unknown) {
+      setCloudSyncError(
+        err instanceof Error ? err.message : 'Google sign-in failed'
+      );
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleCloudSignOut = async () => {
+    try {
+      await logoutGoogle();
+      setCloudUser(null);
+      setIsGoogleAuthenticated(false);
+      setGoogleUserEmail(null);
+      triggerFeedback('Signed out of Google Cloud. Local offline storage active.');
+    } catch (err: unknown) {
+      console.error('Sign-out error:', err);
+    }
+  };
+
+  const handleManualCloudSync = async () => {
+    if (!cloudUser) return;
+    setIsCloudSyncing(true);
+    setCloudSyncError(null);
+    try {
+      const res = await migrateLocalDataToFirestore(
+        cloudUser.uid,
+        medications,
+        logs,
+        cloudUser.email,
+        cloudUser.displayName
+      );
+      triggerFeedback(
+        `Cloud sync complete: ${res.migratedMeds} medications and ${res.migratedLogs} logs synchronized.`
+      );
+    } catch (err: unknown) {
+      setCloudSyncError(
+        err instanceof Error ? err.message : 'Cloud sync failed'
+      );
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
   // Compute global KPI strip numbers
   const todayDoses = getScheduledDosesForDate(
     medications,
@@ -1254,8 +1510,20 @@ function CadenceRxWorkspace() {
           })}
         </nav>
 
-        {/* Zone 3: Primary action + Reminders Hub Action */}
+        {/* Zone 3: Primary action + Reminders Hub Action + Cloud Sync */}
         <div className="flex items-center gap-2.5 shrink-0">
+          <CloudSyncStatus
+            user={cloudUser}
+            isSyncing={isCloudSyncing}
+            syncError={cloudSyncError}
+            isMigrating={isCloudMigrating}
+            medicationCount={medications.length}
+            logCount={Object.keys(logs).length}
+            onSignIn={handleCloudSignIn}
+            onSignOut={handleCloudSignOut}
+            onManualSync={handleManualCloudSync}
+          />
+
           <button
             type="button"
             onClick={() => setIsRemindersHubOpen(true)}

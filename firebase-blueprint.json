@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile representing the authenticated account in CadenceRx",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the authenticated Google user"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when user profile was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when user profile was last updated"
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "Medication": {
+      "title": "Medication",
+      "description": "A scheduled medication or supplement record in the user's cabinet",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the medication",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Medication name",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "strength": {
+          "type": "string",
+          "description": "Dosage strength (e.g., 20 mg, 500 mcg)",
+          "maxLength": 60
+        },
+        "form": {
+          "type": "string",
+          "description": "Dosage form",
+          "enum": ["Tablet", "Capsule", "Softgel", "Liquid", "Inhaler", "Topical", "Injection"]
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Patient usage instructions (e.g. Take with breakfast)",
+          "maxLength": 250
+        },
+        "purpose": {
+          "type": "string",
+          "description": "Clinical category or purpose",
+          "maxLength": 100
+        },
+        "frequency": {
+          "type": "string",
+          "description": "Dose frequency schedule model",
+          "enum": ["daily", "specific_days", "interval"]
+        },
+        "inventory": {
+          "type": "object",
+          "description": "Current inventory, refill threshold and fill date settings"
+        },
+        "timeSlots": {
+          "type": "array",
+          "description": "Configured daily time slot reminders"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether the medication is currently active or paused"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["id", "name", "frequency", "inventory", "timeSlots", "active"]
+    },
+    "DoseLog": {
+      "title": "DoseLog",
+      "description": "Adherence log entry representing a taken, skipped, or missed dose event",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Deterministic key: {dateKey}_{medicationId}_{slotId}",
+          "maxLength": 128
+        },
+        "dateKey": {
+          "type": "string",
+          "description": "Date of scheduled dose formatted as YYYY-MM-DD",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "medicationId": {
+          "type": "string",
+          "description": "Target medication ID",
+          "maxLength": 128
+        },
+        "slotId": {
+          "type": "string",
+          "description": "Target time slot ID",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the scheduled dose",
+          "enum": ["taken", "skipped", "missed"]
+        },
+        "loggedAt": {
+          "type": "string",
+          "description": "Time of log in HH:mm or ISO string"
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional patient note or skip reason",
+          "maxLength": 250
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Update timestamp"
+        }
+      },
+      "required": ["id", "dateKey", "medicationId", "slotId", "status", "loggedAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User preferences including browser migration flag and notifications",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "migrationCompleted": {
+          "type": "boolean",
+          "description": "Whether local browser data has been migrated into Firestore"
+        },
+        "lastSyncedAt": {
+          "type": "string",
+          "description": "Timestamp of most recent sync"
+        }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Root document for a registered user"
+    },
+    "/users/{userId}/medications/{medicationId}": {
+      "schema": "Medication",
+      "description": "User private medication catalog and inventory"
+    },
+    "/users/{userId}/doseLogs/{logId}": {
+      "schema": "DoseLog",
+      "description": "User private adherence dose logs"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "UserSettings",
+      "description": "User preferences and cloud sync metadata"
+    }
+  }
+}
