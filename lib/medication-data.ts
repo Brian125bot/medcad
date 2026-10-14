@@ -57,9 +57,11 @@ export interface DoseLogEntry {
   status: DoseStatus;
   loggedAt: string; // HH:mm
   note?: string;
+  id?: string; // Optional alias for key
 }
 
 export type DoseLogMap = Record<string, DoseLogEntry>;
+export type DoseLogItem = DoseLogEntry;
 
 export interface ScheduledDoseInstance {
   key: string;

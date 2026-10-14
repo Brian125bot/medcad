@@ -1,209 +1,118 @@
-# CadenceRx — Cloud Data Persistence & Real-time Google Account Sync
+# COR-76: Native Background Alarm & Notification Engine
 
-CadenceRx is transitioning from browser-only storage to a real-time, multi-device cloud architecture powered by Firebase Firestore and Google Authentication. This allows users to access their medication schedules, adherence logs, refill forecasts, and Google Calendar sync seamlessly across phones, tablets, and desktop browsers with automated data migration and offline fallback.
+An offline-first, clinically reliable background notification and alarm engine for CadenceRx that schedules recurring alerts across medication time slots, supports interactive quick actions ("Take Dose" and "Snooze 15m"), and provides graceful permission handling and dual-mode delivery.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following architectural decisions have been aligned based on your responses and will guide the implementation:
-
-- **Confirmed Decision 1 — Firebase Firestore Synced with Google Account**: The application will use Firebase Authentication with Google Sign-In as the primary identity provider, anchoring the user's medication database to their Google account.
-- **Confirmed Decision 2 — Real-time Multi-Device Sync Across Devices**: Utilizes Firestore real-time snapshot listeners (`onSnapshot`) to immediately reflect dose completions, inventory decrements, and schedule adjustments across all active sessions (desktop and mobile) with zero manual refresh required.
-- **Confirmed Decision 3 — Automatic Browser-to-Cloud Migration**: When an existing user signs in with Google for the first time, the client will automatically detect local browser logs and cabinet data, upload them safely into their private Firestore profile, and confirm migration with clear visual feedback without any data loss.
-- **Key Architectural Standard — Seamless Offline-First Resilience**: If the user is unauthenticated or temporarily offline, CadenceRx continues to operate flawlessly with local browser storage, syncing updates to the cloud automatically upon reconnection or authentication.
+> The following architectural decisions were confirmed via interactive clarification:
+> - **Delivery Architecture**: Dual-mode engine supporting native mobile notifications via `expo-notifications` along with Web Notifications API and an interactive Web Audio API synthesized high-priority chime fallback for web preview environments.
+> - **Default Lead-Time**: Notifications are scheduled for the **exact time** of the dose (0 minutes lead-time), with configurable preferences for 5 minutes and 15 minutes prior.
+> - **Sound Profile & Interruption Level**: High-priority alert sound with persistent critical chime, setting Android notification channel importance to `MAX` and iOS interruption level to `critical`/`timeSensitive`.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Upgrades CadenceRx with a cloud synchronization layer. Users can sign in with their Google account to persist and synchronize active medications, time-block schedules, dose completion histories, refill thresholds, and Google Calendar event mappings in real time.
-- **Target Audience / Persona**: Individuals who manage daily prescriptions and supplements across multiple devices (e.g., desktop at work, smartphone or tablet at home) and demand continuous synchronization without risk of losing their adherence streaks or inventory tracking.
-- **Key Value**: Guarantees zero data loss across browser clearings, device upgrades, or multi-device usage while maintaining instant (<200ms) optimistic local response times and real-time cloud harmony.
+CadenceRx is a precision medication adherence platform where timely dose delivery directly impacts patient health outcomes. COR-76 establishes a deterministic, offline-capable notification engine that:
+
+1. **Pre-computes & Schedules Recurring Alerts**: Scans all active medications and their scheduled time slots (`Morning`, `Midday`, `Evening`, `Bedtime` or custom 24-hour times), scheduling recurring local notifications without requiring an active network connection.
+2. **Clinical Permission Onboarding**: Displays an authoritative, HIPAA-conscious clinical modal before requesting OS notification permissions, highlighting the medical safety rationale.
+3. **Interactive Notification Actions**:
+   - `TAKE_DOSE`: Instantly records the dose as taken directly from the notification action or quick banner without requiring a full app reload.
+   - `SNOOZE_15`: Automatically reschedules the notification for 15 minutes later and updates temporary snooze state.
+4. **Reactive Rescheduling Engine**: Automatically cleans up and reschedules local alarms whenever medications are created, updated, paused, or deleted, or when lead-time preferences change.
+5. **Persistence Across Device Restarts**: Uses local storage persistence (`medicationRepository` preferences and notification registry) so that scheduled triggers are rehydrated and synchronized on every app startup.
 
 ---
 
-## 2. User Experience & Visual Design
+## 2. Visual & Structural Specifications
 
-### Key User Flows
+### A. Clinical Permission Explanation Dialog
+- **Component**: `components/NotificationPermissionModal.tsx`
+- **Clinical Rationale Presentation**: Clean, trusted medical aesthetics (slate-900 typography, teal-600 accents, shield icon). Clear bulleted reasons:
+  - Exact timing for critical therapeutic windows.
+  - Low-stock inventory depletion alerts.
+  - Missed dose recovery prompts.
+- **Actions**: "Enable Medication Reminders" (triggers browser/Expo permission request) and "Not Now, Remind Me Later" (quiet dismiss without nagging).
 
-1. **Authentication & Profile Bar (Top Navigation)**:
-   - The top navigation bar displays a clean **Cloud Sync** status in Zone 3:
-     - *Signed Out State*: Displays a discreet `Save & Sync` button with a Google icon and tooltip explaining cloud backup benefits.
-     - *Syncing State*: Displays an animated cloud synchronization indicator (`Syncing...`).
-     - *Synchronized State*: Displays a verified green status (`Cloud Synced · creetacticalgenius@gmail.com`) with a popover menu allowing manual refresh, data export, or sign out.
-2. **First-Time Google Sign-In & Automatic Migration**:
-   - User clicks **Sign in with Google** (via Firebase Google Auth popup).
-   - Upon successful authentication, the system checks whether the cloud account has existing data:
-     - *If cloud is empty and local data exists*: An animated migration toast appears: *"Migrating your local medications and dose history to your Google account..."*. All medications, dose logs, and reminder settings are atomically written to Firestore.
-     - *Migration Complete*: A confirmation notification displays: *"6 medications and 35 dose logs successfully backed up to your Google account."*
-   - Seamlessly pairs with the existing Google Calendar integration scope.
-3. **Multi-Device Real-Time Synchronization**:
-   - Marking a dose as *Taken* or *Skipped* on a smartphone immediately broadcasts the state change to Firestore.
-   - An open desktop browser session updates its Daily Log checklist, Weekly Matrix cells, Monthly Heatmap score, and remaining inventory gauge within milliseconds without full-page reloads.
-4. **Offline & Network Interruption Handling**:
-   - If a network drop occurs, the app gracefully switches into an optimistic offline mode with a subtle amber badge (`Working Offline · Changes saved locally`).
-   - Upon network restoration, pending modifications are pushed to Firestore and verified.
-
-### Visual Identity & Theme (SaaS Dashboard & Medical Precision)
-
-- **Aesthetic Direction**: Follows the clinical editorial guidelines from `references/3_saas_dashboard.md`. Flat single-elevation surfaces, hairline 1px borders (`border-slate-200`), tabular typography, and zero ornamental clutter.
-- **Color Discipline (60-30-10 Palette)**:
-  - *60% Neutral Canvas*: Slate-50 canvas (`#F8FAFC`) with pure white workspace panels.
-  - *30% Structural Typography & Hairlines*: Slate-900 for high-contrast tabular values; Slate-600 for secondary prose; Slate-200 for 1px hairline dividers.
-  - *10% Intentional Accent & Status*:
-    - Teal-600 (`#0D9488`): Primary action accent and active tab indicator.
-    - Emerald-600 (`#16A34A`): Cloud Synced status and Taken dose indicators.
-    - Amber-600 (`#D97706`): Low supply alerts and offline warning.
-    - Slate-700: Unboxed metadata typography with subtle middots (`·`).
-- **Top Bar Contract**:
-  - `[CadenceRx]` — `[Daily Log | Weekly Matrix | Monthly Analytics | Cabinet & Refills]` — `[Cloud Sync State | + Add Medication]`.
+### B. Interactive Dose Notification Card & Toast Banner
+- **In-App Dual-Mode Banner**: When an alert fires in-app or via foreground listener:
+  - High-contrast clinical card at top of viewport.
+  - Medication name, strength, instructions (e.g., "Take with food"), and time slot.
+  - Quick action buttons: **Take Dose (Teal button)** and **Snooze 15m (Ghost button)**.
+- **Audio Feedback**: Web Audio API oscillator synthesis generating a distinctive medical double-pulse chime (880Hz / 1320Hz harmonic interval) when alarms trigger.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 3. Architecture & Data Flow
 
-- **Decision 1: Subcollection per User (`users/{userId}/...`) vs Flat Root Collections**
-  - *Chosen Approach*: Subcollections nested under the user document:
-    - `/users/{userId}/medications/{medicationId}`
-    - `/users/{userId}/doseLogs/{logId}`
-    - `/users/{userId}/settings/userPreferences`
-  - *Why*: Provides the highest level of security isolation. Zero chance of cross-tenant data leakage. Security rules can enforce `request.auth.uid == userId` uniformly.
-  - *Alternatives Considered*: Flat collections with a `userId` field. While supported, subcollections allow automatic cascading access rules, cleaner query scopes, and lower security risk.
-- **Decision 2: Optimistic UI with Real-time Snapshots (`onSnapshot`)**
-  - *Chosen Approach*: React state updates optimistically immediately on user click, while a Firestore write occurs in the background. Incoming remote snapshot events from other devices smoothly reconcile into React state.
-  - *Why*: Eliminates latency when tapping "Take Dose" while ensuring true cross-device consistency.
-- **Decision 3: Preserving LocalStorage as Fallback & Offline Cache**
-  - *Chosen Approach*: Keep `localStorage` as a mirror cache when unauthenticated or during network disconnects.
-  - *Why*: Users can continue using CadenceRx without requiring an immediate Google login, and offline travel use is fully supported.
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        CadenceRx State Layer                           │
+│  medications (active) ───► useMedicationStore() ◄─── dose logs        │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ triggers reschedule
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                   lib/notifications.ts Engine                          │
+│                                                                        │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │  Notification Scheduler & Calculator                          │   │
+│   │  - calculateNextDoseTimestamp(time, leadMinutes)               │   │
+│   │  - filterActiveRegimenSlots(medications)                       │   │
+│   │  - computeLeadTimeAdjustedDate(slotTime, preference)           │   │
+│   └────────────────────────────────┬───────────────────────────────┘   │
+│                                    │                                   │
+│            ┌───────────────────────┴───────────────────────┐           │
+│            ▼                                               ▼           │
+│   ┌───────────────────────────────┐     ┌────────────────────────────┐ │
+│   │ Native Expo Notifications     │     │ Web / Preview Notification │ │
+│   │ - scheduleNotificationAsync   │     │ - Notification API         │ │
+│   │ - setNotificationCategoryAsync│     │ - Web Audio Alert Chime    │ │
+│   │ - "TAKE_DOSE" & "SNOOZE_15"   │     │ - Active Alert Queue state │ │
+│   └───────────────────────────────┘     └────────────────────────────┘ │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ action response
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│   handleLogDose() / handleSnoozeDose() ──► medicationRepository        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Module Specifications:
+- `lib/notifications.ts`:
+  - `initNotificationEngine()`: Sets up Android notification channels, registers categories (`DOSE_REMINDER_CATEGORY` with `TAKE_DOSE` and `SNOOZE_15`), and configures listeners.
+  - `requestNotificationPermissions()`: Graceful permission request returning permission status.
+  - `rescheduleAllMedicationReminders(medications, leadTimeMinutes)`: Cancels obsolete scheduled alarms and schedules recurring triggers for all active medication slots.
+  - `scheduleSnoozeNotification(medication, slot, snoozeMinutes)`: Creates an ad-hoc alarm `snoozeMinutes` into the future.
+  - `cancelMedicationNotifications(medicationId)`: Clears pending notifications for a specific medication.
+  - `playDoseAlertChime()`: Web Audio API sound generator for audio alarms.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+## 4. Implementation Steps
 
-### System Architecture Diagram
+### Phase 1: Core Notification Engine (`lib/notifications.ts`)
+- Implement time slot parsing and next-trigger calculation utilities.
+- Configure notification categories (`TAKE_DOSE`, `SNOOZE_15`) with icons and response listeners.
+- Add dual-mode adapter: native `expo-notifications` (if runtime supports) with safe Web Notifications API + Web Audio fallback.
+- Support lead-time preferences (`0`, `5`, `15` minutes).
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          CadenceRx Web Application                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  Top Bar: [CadenceRx]   [Views: Daily/Week/Month/Cabinet]   [Sync & Auth]   │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                ┌──────────────────────┴──────────────────────┐
-                │                                             │
-      (Authenticated)                                  (Unauthenticated)
-                ▼                                             ▼
-┌───────────────────────────────┐             ┌───────────────────────────────┐
-│     Firebase Auth Context     │             │      Local Storage Engine     │
-│  • Google Sign-In Provider    │             │  • Browser localStorage       │
-│  • Token & User UID Stream    │             │  • Instant Seed Fallback      │
-└───────────────┬───────────────┘             └───────────────▲───────────────┘
-                │                                             │
-                ▼                                             │ (Offline cache &
-┌───────────────────────────────┐                             │  migration src)
-│   Firestore Sync Controller   │─────────────────────────────┘
-│  • `onSnapshot` Real-time     │
-│  • Auto-Migration Worker      │
-│  • Optimistic Writes & Retry  │
-└───────────────┬───────────────┘
-                │
-                ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Google Cloud / Firebase Firestore                       │
-│                                                                             │
-│  /users/{userId}                                                            │
-│    ├── /medications/{medicationId}   (Catalog, dosage, schedule, inventory) │
-│    ├── /doseLogs/{logKey}            (Taken/skipped status, timestamps)     │
-│    └── /settings/preferences         (Reminders, calendar sync metadata)    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### Phase 2: Clinical Permission Modal & Preferences
+- Create `components/NotificationPermissionModal.tsx` with clinical explanation.
+- Integrate permission modal into initial app boot sequence when permission is `undetermined` or `default`.
+- Add notification setting toggle & lead-time selector into the Reminders Hub settings modal in `app/page.tsx`.
 
-### Firestore Schema Blueprint (`firebase-blueprint.json`)
+### Phase 3: Store & Lifecycle Integration
+- Hook into `handleSaveMedication`, `handleToggleActiveMedication`, and `handleDeleteMedication` to automatically trigger `rescheduleAllMedicationReminders`.
+- Wire up interactive action handlers for `TAKE_DOSE` (instant dose record) and `SNOOZE_15` (15-minute delay).
+- Hydrate and re-synchronize scheduled notifications on app startup from `medicationRepository`.
 
-1. **Entity `Medication`**:
-   - `id`: String (uuid/timestamp)
-   - `name`: String (1–100 chars)
-   - `strength`: String (e.g., "20 mg")
-   - `form`: String (Tablet, Capsule, Liquid, etc.)
-   - `instructions`: String (max 200 chars)
-   - `purpose`: String
-   - `frequency`: Enum (`daily`, `specific_days`, `interval`)
-   - `daysOfWeek`: Array of numbers (0–6)
-   - `intervalDays`: Number (optional)
-   - `timeSlots`: Array of `{ id, label, time, doseUnits }`
-   - `inventory`: Object `{ currentUnits, capacityUnits, lowThresholdUnits, nextFillDate, pharmacyNote, googleCalendarEventId, lastRefilledAt }`
-   - `active`: Boolean
-   - `createdAt`: String (ISO)
-   - `updatedAt`: Firestore Timestamp (`request.time`)
-2. **Entity `DoseLog`**:
-   - `id`: String (`${dateKey}_${medicationId}_${slotId}`)
-   - `dateKey`: String (`YYYY-MM-DD`)
-   - `medicationId`: String
-   - `slotId`: String
-   - `status`: Enum (`taken`, `skipped`, `missed`)
-   - `loggedAt`: String (`HH:mm`)
-   - `note`: String (optional, max 200 chars)
-   - `updatedAt`: Firestore Timestamp (`request.time`)
-3. **Entity `UserSettings`**:
-   - `userId`: String
-   - `migrationCompleted`: Boolean
-   - `reminderPreferences`: Object
-   - `updatedAt`: Firestore Timestamp (`request.time`)
-
-### Hardened Firestore Security Rules Design
-
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Default Deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    match /users/{userId} {
-      allow get, write: if isOwner(userId);
-
-      match /medications/{medicationId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /doseLogs/{logId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      match /settings/{settingId} {
-        allow read, write: if isOwner(userId);
-      }
-    }
-  }
-}
-```
-
-### Step-by-Step Execution Plan
-
-1. **Firebase Provisioning & Auth Configuration**:
-   - Call `set_up_firebase` / `show_aistudio_ui` for user confirmation.
-   - Provision Firestore and Google Authentication.
-   - Establish `firebase-blueprint.json` and deploy hardened `firestore.rules`.
-2. **Firebase Client SDK & Authentication Context (`lib/firebase.ts`)**:
-   - Initialize Firebase App and Firestore with robust error handler (`handleFirestoreError`).
-   - Create `useFirebaseAuth` hook supplying current user, auth state, and `signInWithGoogle` / `signOut` actions.
-3. **Cloud Data Sync & Migration Service (`lib/firestore-sync.ts`)**:
-   - Implement real-time subscriptions for medications and dose logs via `onSnapshot`.
-   - Implement automatic one-time migration worker to seamlessly promote browser `localStorage` records into Firestore upon first login.
-4. **UI Integration (`app/page.tsx`, `CabinetInventoryView.tsx`, Top Bar)**:
-   - Integrate Google Cloud Sync status pill and account avatar/menu into the top navigation bar.
-   - Ensure seamless interoperability between Firebase Google sign-in and Google Calendar sync.
-   - Verify bulk sync and individual refill sync continue operating without disruption.
-5. **Verification & Testing**:
-   - Verify seamless offline operation when disconnected.
-   - Test cross-device synchronization and compile the application.
+### Phase 4: Unit Testing & Verification
+- Create `tests/notifications.test.ts` covering:
+  - Calculation of scheduled triggers with exact, 5-min, and 15-min lead times.
+  - Rescheduling idempotence and obsolete notification cancellation.
+  - Action category payload verification (`TAKE_DOSE` and `SNOOZE_15`).
+  - Active vs. inactive medication filtering.
+- Run `pnpm check` / linter and execute the automated test suite.

@@ -282,6 +282,42 @@ export default function RemindersHubModal({
                 </div>
               </div>
 
+              {/* Lead-Time Alert Preference (COR-76) */}
+              <div className="p-3.5 bg-white border border-slate-200 rounded-md space-y-1.5">
+                <div className="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
+                  <Bell className="w-3.5 h-3.5 text-teal-600" />
+                  <span>Lead-Time Alert Preference</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Notify before scheduled slot for dose preparation
+                </p>
+                <div className="flex items-center gap-1.5 pt-1">
+                  {[
+                    { label: 'Exact Time (0m)', value: 0 as const },
+                    { label: '5m Prior', value: 5 as const },
+                    { label: '15m Prior', value: 15 as const },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() =>
+                        onUpdateSettings({
+                          ...settings,
+                          leadTimeMinutes: opt.value,
+                        })
+                      }
+                      className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                        (settings.leadTimeMinutes ?? 0) === opt.value
+                          ? 'bg-teal-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Global Mute Toggle */}
               <label className="flex items-start justify-between gap-3 p-3.5 bg-white border border-slate-200 rounded-md cursor-pointer hover:border-slate-300 transition-colors">
                 <div className="space-y-0.5">

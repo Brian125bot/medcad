@@ -7,8 +7,9 @@ export type ReminderNotificationPermission =
 export interface ReminderSettings {
   browserAlertsEnabled: boolean;
   soundChimeEnabled: boolean;
-  snoozeDurationMinutes: number; // default: 10
+  snoozeDurationMinutes: number; // default: 15 (COR-76)
   globalMute: boolean;
+  leadTimeMinutes?: 0 | 5 | 15; // default: 0 (exact time of scheduled dose)
 }
 
 export interface SnoozedReminder {
@@ -43,8 +44,9 @@ export interface ActiveAlertItem {
 export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   browserAlertsEnabled: true,
   soundChimeEnabled: true,
-  snoozeDurationMinutes: 10,
+  snoozeDurationMinutes: 15,
   globalMute: false,
+  leadTimeMinutes: 0,
 };
 
 export const STORAGE_REMINDERS_KEY = 'cadencerx_reminder_settings_v1';

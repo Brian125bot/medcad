@@ -75,6 +75,20 @@ import ActiveReminderBanner from '@/components/ActiveReminderBanner';
 import BulkSyncProgressModal, {
   BulkSyncItemProgress,
 } from '@/components/BulkSyncProgressModal';
+import StorageEncryptionBadge from '@/components/StorageEncryptionBadge';
+import NotificationPermissionModal from '@/components/NotificationPermissionModal';
+import {
+  initNotificationEngine,
+  rescheduleAllMedicationReminders,
+  scheduleSnoozeNotification,
+  addNotificationResponseReceivedListener,
+  ACTION_TAKE_DOSE,
+  ACTION_SNOOZE_15,
+  checkNotificationPermission,
+  getNotificationPreferences,
+} from '@/lib/notifications';
+import { medicationRepository } from '@/lib/storage/repository';
+import { StorageBenchmarkResult, StorageEngineInfo } from '@/lib/storage/database';
 
 type WorkspaceView = 'daily' | 'weekly' | 'monthly' | 'cabinet';
 
@@ -148,6 +162,47 @@ function CadenceRxWorkspace() {
     return createInitialSeedData(toDateKey(new Date())).logs;
   });
 
+  // Local Encrypted Relational Storage Engine State (COR-71)
+  const [storageInfo, setStorageInfo] = useState<StorageEngineInfo>(() =>
+    medicationRepository.getStorageEngineInfo()
+  );
+  const [benchmarkResult, setBenchmarkResult] =
+    useState<StorageBenchmarkResult | null>(null);
+
+  // Hydrate state from local encrypted vault on mount
+  useEffect(() => {
+    let isCancelled = false;
+    async function loadEncryptedVault() {
+      try {
+        await medicationRepository.ensureReady();
+        const loadedMeds = await medicationRepository.getAllMedications();
+        const loadedLogs = await medicationRepository.getAllDoseLogs();
+        if (!isCancelled) {
+          if (loadedMeds.length > 0) {
+            setMedications(loadedMeds);
+          }
+          if (Object.keys(loadedLogs).length > 0) {
+            setLogs(loadedLogs);
+          }
+          setStorageInfo(medicationRepository.getStorageEngineInfo());
+        }
+      } catch (err) {
+        console.error('Failed to hydrate from encrypted vault:', err);
+      }
+    }
+    loadEncryptedVault();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  const handleRunStorageBenchmark = useCallback(async (): Promise<StorageBenchmarkResult> => {
+    const res = await medicationRepository.runBenchmark();
+    setBenchmarkResult(res);
+    setStorageInfo(medicationRepository.getStorageEngineInfo());
+    return res;
+  }, []);
+
   // Modal & Toast Feedback State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingMedication, setEditingMedication] =
@@ -211,6 +266,54 @@ function CadenceRxWorkspace() {
   // Prevent multiple alerts within the same minute for the same slot
   const alertedSlotsSetRef = useRef<Set<string>>(new Set());
 
+  // Native Background Alarm & Notification Engine State (COR-76)
+  const [
+    isNotificationPermissionModalOpen,
+    setIsNotificationPermissionModalOpen,
+  ] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const prefs = getNotificationPreferences();
+    const perm = checkNotificationPermission();
+    return !prefs.hasSeenPermissionPrompt && perm === 'undetermined';
+  });
+
+  // Initialize Notification Engine on mount
+  useEffect(() => {
+    initNotificationEngine().catch((err) =>
+      console.error('Failed to initialize notification engine:', err)
+    );
+  }, []);
+
+  // Reactive notification rescheduling (COR-76)
+  // Automatically reschedules whenever medications change (created, edited, paused, deleted)
+  // or user changes their lead-time alert preference
+  useEffect(() => {
+    if (!reminderSettings.globalMute && reminderSettings.browserAlertsEnabled) {
+      rescheduleAllMedicationReminders(
+        medications,
+        reminderSettings.leadTimeMinutes ?? 0
+      ).catch((err) =>
+        console.error('Failed to reschedule medication reminders:', err)
+      );
+    }
+  }, [
+    medications,
+    reminderSettings.leadTimeMinutes,
+    reminderSettings.browserAlertsEnabled,
+    reminderSettings.globalMute,
+  ]);
+
+  const latestMedsRef = useRef(medications);
+  const latestLogsRef = useRef(logs);
+
+  useEffect(() => {
+    latestMedsRef.current = medications;
+  }, [medications]);
+
+  useEffect(() => {
+    latestLogsRef.current = logs;
+  }, [logs]);
+
   // Connection check on mount
   useEffect(() => {
     testConnection().catch(() => {});
@@ -237,12 +340,14 @@ function CadenceRxWorkspace() {
           try {
             setIsCloudSyncing(true);
             const state = await checkUserCloudDataState(user.uid);
-            if (!state.hasCloudData && medications.length > 0) {
+            const currentLocalMeds = latestMedsRef.current;
+            const currentLocalLogs = latestLogsRef.current;
+            if (!state.hasCloudData && currentLocalMeds.length > 0) {
               setIsCloudMigrating(true);
               const migrationResult = await migrateLocalDataToFirestore(
                 user.uid,
-                medications,
-                logs,
+                currentLocalMeds,
+                currentLocalLogs,
                 user.email,
                 user.displayName
               );
@@ -306,12 +411,10 @@ function CadenceRxWorkspace() {
       if (unsubMeds) unsubMeds();
       if (unsubLogs) unsubLogs();
     };
-  }, []);
+  }, [triggerFeedback]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_MEDS_KEY, JSON.stringify(medications));
-      localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(logs));
       localStorage.setItem(
         STORAGE_REMINDERS_KEY,
         JSON.stringify(reminderSettings)
@@ -320,10 +423,13 @@ function CadenceRxWorkspace() {
         STORAGE_SNOOZED_KEY,
         JSON.stringify(snoozedReminders)
       );
+      // Clean up legacy plaintext medication data to ensure zero-leakage at rest (COR-71)
+      localStorage.removeItem(STORAGE_MEDS_KEY);
+      localStorage.removeItem(STORAGE_LOGS_KEY);
     } catch {
       // Ignore quota errors
     }
-  }, [medications, logs, reminderSettings, snoozedReminders]);
+  }, [reminderSettings, snoozedReminders]);
 
   useEffect(() => {
     if (!feedbackBanner) return;
@@ -577,6 +683,14 @@ function CadenceRxWorkspace() {
       }
     }
 
+    // Persist to local encrypted vault with sub-15ms write latency (COR-71)
+    medicationRepository
+      .logDose(dateKey, medicationId, slotId, status, note)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to log dose in local encrypted storage:', err)
+      );
+
     // Dismiss any active alert or snooze for this dose
     setActiveAlerts((prev) => prev.filter((a) => a.doseKey !== key));
     setSnoozedReminders((prev) => prev.filter((s) => s.doseKey !== key));
@@ -636,6 +750,14 @@ function CadenceRxWorkspace() {
       delete next[key];
       return next;
     });
+
+    // Persist to local encrypted vault with sub-15ms write latency (COR-71)
+    medicationRepository
+      .undoDose(dateKey, medicationId, slotId)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to undo dose in local encrypted storage:', err)
+      );
 
     if (cloudUser) {
       deleteDoseLogFromFirestore(cloudUser.uid, key).catch((err) =>
@@ -706,6 +828,14 @@ function CadenceRxWorkspace() {
       })
     );
 
+    // Persist bulk block to local encrypted repository
+    medicationRepository
+      .bulkSaveDoseLogs(nextLogs)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to save bulk logs to encrypted storage:', err)
+      );
+
     // Dismiss active alerts for these instances
     const instanceKeys = new Set(instances.map((i) => i.key));
     setActiveAlerts((prev) => prev.filter((a) => !instanceKeys.has(a.doseKey)));
@@ -761,6 +891,14 @@ function CadenceRxWorkspace() {
       prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
 
+    // Persist to local encrypted vault (COR-71)
+    medicationRepository
+      .saveMedication(updatedMed)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to save refill in local encrypted storage:', err)
+      );
+
     if (cloudUser) {
       saveMedicationToFirestore(cloudUser.uid, updatedMed).catch((err) =>
         console.error('Failed to sync refill to cloud:', err)
@@ -781,6 +919,14 @@ function CadenceRxWorkspace() {
       return [...prev, savedMed];
     });
 
+    // Persist to local encrypted vault (COR-71)
+    medicationRepository
+      .saveMedication(savedMed)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to save medication to local encrypted storage:', err)
+      );
+
     if (cloudUser) {
       saveMedicationToFirestore(cloudUser.uid, savedMed).catch((err) =>
         console.error('Failed to save medication to cloud:', err)
@@ -799,6 +945,14 @@ function CadenceRxWorkspace() {
       prev.map((m) => (m.id === medicationId ? updatedMed : m))
     );
 
+    // Persist to local encrypted vault (COR-71)
+    medicationRepository
+      .toggleActiveMedication(medicationId)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to toggle active medication in local encrypted storage:', err)
+      );
+
     if (cloudUser) {
       saveMedicationToFirestore(cloudUser.uid, updatedMed).catch((err) =>
         console.error('Failed to toggle active medication in cloud:', err)
@@ -809,6 +963,14 @@ function CadenceRxWorkspace() {
   const handleDeleteMedication = (medicationId: string) => {
     const target = medications.find((m) => m.id === medicationId);
     setMedications((prev) => prev.filter((m) => m.id !== medicationId));
+
+    // Persist to local encrypted vault (COR-71)
+    medicationRepository
+      .deleteMedication(medicationId)
+      .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+      .catch((err) =>
+        console.error('Failed to delete medication from local encrypted storage:', err)
+      );
 
     if (cloudUser) {
       deleteMedicationFromFirestore(cloudUser.uid, medicationId).catch((err) =>
@@ -822,9 +984,20 @@ function CadenceRxWorkspace() {
   };
 
   const handleResetSampleData = () => {
-    const seeded = createInitialSeedData(todayKey);
-    setMedications(seeded.medications);
-    setLogs(seeded.logs);
+    // Reset local encrypted repository to curated demo dataset (COR-71)
+    medicationRepository
+      .resetSampleData()
+      .then((seeded) => {
+        setMedications(seeded.medications);
+        setLogs(seeded.logs);
+        setStorageInfo(medicationRepository.getStorageEngineInfo());
+      })
+      .catch(() => {
+        const seeded = createInitialSeedData(todayKey);
+        setMedications(seeded.medications);
+        setLogs(seeded.logs);
+      });
+
     setSelectedDate(todayKey);
     setActiveAlerts([]);
     setSnoozedReminders([]);
@@ -898,10 +1071,65 @@ function CadenceRxWorkspace() {
       fireAtTimestamp: Date.now() + minutes * 60 * 1000,
     };
     setSnoozedReminders((prev) => [snoozedItem, ...prev]);
+
+    // Schedule in background notification engine (COR-76)
+    const targetMed = medications.find((m) => m.id === alert.medicationId);
+    const targetSlot = targetMed?.timeSlots.find((s) => s.id === alert.slotId);
+    if (targetMed && targetSlot) {
+      scheduleSnoozeNotification(targetMed, targetSlot, alert.dateKey, minutes);
+    }
+
     triggerFeedback(
       `Snoozed ${alert.medicationName} reminder for ${minutes} minutes`
     );
   };
+
+  const handleLogDoseRef = useRef(handleLogDose);
+  useEffect(() => {
+    handleLogDoseRef.current = handleLogDose;
+  });
+
+  // Register background notification interactive response listener (COR-76)
+  useEffect(() => {
+    const sub = addNotificationResponseReceivedListener((response) => {
+      const action = response.actionIdentifier;
+      const data = response.notification.request.content.data as
+        | {
+            dateKey?: string;
+            medicationId?: string;
+            slotId?: string;
+            doseKey?: string;
+          }
+        | undefined;
+
+      if (
+        action === ACTION_TAKE_DOSE &&
+        data?.dateKey &&
+        data?.medicationId &&
+        data?.slotId
+      ) {
+        handleLogDoseRef.current(
+          data.dateKey,
+          data.medicationId,
+          data.slotId,
+          'taken'
+        );
+      } else if (action === ACTION_SNOOZE_15 && data?.medicationId) {
+        const targetMed = latestMedsRef.current.find(
+          (m) => m.id === data.medicationId
+        );
+        const targetSlot = targetMed?.timeSlots.find(
+          (s) => s.id === data.slotId
+        );
+        if (targetMed && targetSlot && data.dateKey) {
+          scheduleSnoozeNotification(targetMed, targetSlot, data.dateKey, 15);
+          triggerFeedback(`Snoozed ${targetMed.name} for 15 minutes`);
+        }
+      }
+    });
+
+    return () => sub.remove();
+  }, [triggerFeedback]);
 
   const handleSkipActiveAlert = (alert: ActiveAlertItem) => {
     handleLogDose(
@@ -1510,8 +1738,14 @@ function CadenceRxWorkspace() {
           })}
         </nav>
 
-        {/* Zone 3: Primary action + Reminders Hub Action + Cloud Sync */}
+        {/* Zone 3: Primary action + Reminders Hub Action + Cloud Sync + Local Encrypted Vault */}
         <div className="flex items-center gap-2.5 shrink-0">
+          <StorageEncryptionBadge
+            storageInfo={storageInfo}
+            benchmarkResult={benchmarkResult}
+            onRunBenchmark={handleRunStorageBenchmark}
+          />
+
           <CloudSyncStatus
             user={cloudUser}
             isSyncing={isCloudSyncing}
@@ -1817,6 +2051,21 @@ function CadenceRxWorkspace() {
         currentIndex={bulkSyncCurrentIndex}
         onClose={() => setIsBulkSyncModalOpen(false)}
         onRetryFailed={handleRetryBulkSyncFailed}
+      />
+
+      {/* Clinical Explanation Notification Permission Dialog (COR-76) */}
+      <NotificationPermissionModal
+        isOpen={isNotificationPermissionModalOpen}
+        onClose={() => setIsNotificationPermissionModalOpen(false)}
+        onPermissionResolved={(status) => {
+          if (status === 'granted') {
+            setReminderSettings((prev) => ({
+              ...prev,
+              browserAlertsEnabled: true,
+            }));
+            triggerFeedback('Clinical dose reminders enabled');
+          }
+        }}
       />
     </div>
   );

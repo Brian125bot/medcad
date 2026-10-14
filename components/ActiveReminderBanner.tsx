@@ -100,7 +100,7 @@ export default function ActiveReminderBanner({
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-teal-600 hover:bg-teal-700 rounded-md transition-colors cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
-                Log Taken
+                Take Dose
               </button>
 
               <button
