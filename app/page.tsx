@@ -27,6 +27,7 @@ import {
   computeAdherenceAnalytics,
   diffDaysBetweenKeys,
   computeRecommendedNextFillDate,
+  getEffectiveLeadMinutes,
 } from '@/lib/medication-data';
 import {
   ReminderSettings,
@@ -86,6 +87,9 @@ import {
   ACTION_SNOOZE_15,
   checkNotificationPermission,
   getNotificationPreferences,
+  saveNotificationPreferences,
+  cancelAllScheduledNotifications,
+  handleNotificationAction,
 } from '@/lib/notifications';
 import { medicationRepository } from '@/lib/storage/repository';
 import { StorageBenchmarkResult, StorageEngineInfo } from '@/lib/storage/database';
@@ -284,10 +288,18 @@ function CadenceRxWorkspace() {
     );
   }, []);
 
-  // Reactive notification rescheduling (COR-76)
+  // Reactive notification rescheduling (COR-76 / Requirement 2)
   // Automatically reschedules whenever medications change (created, edited, paused, deleted)
-  // or user changes their lead-time alert preference
+  // or user changes their lead-time alert preference, browserAlertsEnabled, or globalMute
   useEffect(() => {
+    // Keep notification preferences in sync with reminderSettings
+    saveNotificationPreferences({
+      enabled: reminderSettings.browserAlertsEnabled,
+      globalMute: reminderSettings.globalMute,
+      leadTimeMinutes: reminderSettings.leadTimeMinutes ?? 0,
+      criticalChimeEnabled: reminderSettings.soundChimeEnabled,
+    });
+
     if (!reminderSettings.globalMute && reminderSettings.browserAlertsEnabled) {
       rescheduleAllMedicationReminders(
         medications,
@@ -295,12 +307,16 @@ function CadenceRxWorkspace() {
       ).catch((err) =>
         console.error('Failed to reschedule medication reminders:', err)
       );
+    } else {
+      // Disabling alerts or enabling global mute cancels active timers and persisted schedules
+      cancelAllScheduledNotifications();
     }
   }, [
     medications,
     reminderSettings.leadTimeMinutes,
     reminderSettings.browserAlertsEnabled,
     reminderSettings.globalMute,
+    reminderSettings.soundChimeEnabled,
   ]);
 
   const latestMedsRef = useRef(medications);
@@ -423,9 +439,6 @@ function CadenceRxWorkspace() {
         STORAGE_SNOOZED_KEY,
         JSON.stringify(snoozedReminders)
       );
-      // Clean up legacy plaintext medication data to ensure zero-leakage at rest (COR-71)
-      localStorage.removeItem(STORAGE_MEDS_KEY);
-      localStorage.removeItem(STORAGE_LOGS_KEY);
     } catch {
       // Ignore quota errors
     }
@@ -528,8 +541,11 @@ function CadenceRxWorkspace() {
 
         const [slotH, slotM] = inst.slot.time.split(':').map(Number);
         const slotMinutesOfDay = slotH * 60 + slotM;
-        const leadMin = inst.slot.leadMinutes || 0;
-        const targetAlertMinute = slotMinutesOfDay - leadMin;
+        const slotLead = getEffectiveLeadMinutes(
+          inst.slot.leadMinutes,
+          reminderSettings.leadTimeMinutes ?? 0
+        );
+        const targetAlertMinute = slotMinutesOfDay - slotLead;
 
         // Check if current minute matches target alert minute
         if (currentMinutesOfDay === targetAlertMinute) {
@@ -1026,31 +1042,68 @@ function CadenceRxWorkspace() {
     triggerFeedback('Exported medication schedule & adherence history (JSON)');
   };
 
-  // Toggle reminder enabled/muted for a specific time slot
+  // Toggle reminder enabled/muted for a specific time slot (COR-76 / Requirement 6)
   const handleToggleSlotReminder = (medicationId: string, slotId: string) => {
+    let updatedMedication: Medication | null = null;
+    let nextVal = true;
+
     setMedications((prev) =>
       prev.map((m) => {
         if (m.id !== medicationId) return m;
-        return {
-          ...m,
-          timeSlots: m.timeSlots.map((s) => {
-            if (s.id !== slotId) return s;
-            const nextVal = s.reminderEnabled === false ? true : false;
-            triggerFeedback(
-              nextVal
-                ? `Enabled reminder alert for ${m.name} (${s.time})`
-                : `Muted reminder alert for ${m.name} (${s.time})`
-            );
-            return {...s, reminderEnabled: nextVal};
-          }),
-        };
+        const updatedSlots = m.timeSlots.map((s) => {
+          if (s.id !== slotId) return s;
+          nextVal = s.reminderEnabled === false ? true : false;
+          return { ...s, reminderEnabled: nextVal };
+        });
+        updatedMedication = { ...m, timeSlots: updatedSlots };
+        return updatedMedication;
       })
     );
+
+    if (updatedMedication) {
+      const med = updatedMedication as Medication;
+      const targetSlot = med.timeSlots.find((s) => s.id === slotId);
+
+      // 1. Persist through encrypted repository (survives reload)
+      medicationRepository
+        .saveMedication(med)
+        .then(() => setStorageInfo(medicationRepository.getStorageEngineInfo()))
+        .catch((err) =>
+          console.error('Failed to persist slot reminder toggle in storage:', err)
+        );
+
+      // 2. Sync to Firestore if authenticated
+      if (cloudUser) {
+        saveMedicationToFirestore(cloudUser.uid, med).catch((err) =>
+          console.error('Failed to sync slot reminder toggle to cloud:', err)
+        );
+      }
+
+      // 3. User feedback
+      triggerFeedback(
+        nextVal
+          ? `Enabled reminder alert for ${med.name} (${targetSlot?.time || ''})`
+          : `Muted reminder alert for ${med.name} (${targetSlot?.time || ''})`
+      );
+    }
   };
 
   // Reminder alert actions
   const handleTakeActiveAlert = (alert: ActiveAlertItem) => {
-    handleLogDose(alert.dateKey, alert.medicationId, alert.slotId, 'taken');
+    handleNotificationAction(
+      ACTION_TAKE_DOSE,
+      {
+        doseKey: alert.doseKey,
+        medicationId: alert.medicationId,
+        slotId: alert.slotId,
+        dateKey: alert.dateKey,
+      },
+      {
+        onTakeDose: (payload) => {
+          handleLogDose(payload.dateKey, payload.medicationId, payload.slotId, 'taken');
+        },
+      }
+    );
   };
 
   const handleSnoozeActiveAlert = (
@@ -1089,43 +1142,34 @@ function CadenceRxWorkspace() {
     handleLogDoseRef.current = handleLogDose;
   });
 
-  // Register background notification interactive response listener (COR-76)
+  // Register notification interactive response listener (COR-76 / Requirement 3)
   useEffect(() => {
     const sub = addNotificationResponseReceivedListener((response) => {
       const action = response.actionIdentifier;
-      const data = response.notification.request.content.data as
-        | {
-            dateKey?: string;
-            medicationId?: string;
-            slotId?: string;
-            doseKey?: string;
-          }
-        | undefined;
+      const data = response.notification.request.content.data;
 
-      if (
-        action === ACTION_TAKE_DOSE &&
-        data?.dateKey &&
-        data?.medicationId &&
-        data?.slotId
-      ) {
-        handleLogDoseRef.current(
-          data.dateKey,
-          data.medicationId,
-          data.slotId,
-          'taken'
-        );
-      } else if (action === ACTION_SNOOZE_15 && data?.medicationId) {
-        const targetMed = latestMedsRef.current.find(
-          (m) => m.id === data.medicationId
-        );
-        const targetSlot = targetMed?.timeSlots.find(
-          (s) => s.id === data.slotId
-        );
-        if (targetMed && targetSlot && data.dateKey) {
-          scheduleSnoozeNotification(targetMed, targetSlot, data.dateKey, 15);
-          triggerFeedback(`Snoozed ${targetMed.name} for 15 minutes`);
-        }
-      }
+      handleNotificationAction(action, data, {
+        onTakeDose: (payload) => {
+          handleLogDoseRef.current(
+            payload.dateKey,
+            payload.medicationId,
+            payload.slotId,
+            'taken'
+          );
+        },
+        onSnooze: (payload, minutes) => {
+          const targetMed = latestMedsRef.current.find(
+            (m) => m.id === payload.medicationId
+          );
+          const targetSlot = targetMed?.timeSlots.find(
+            (s) => s.id === payload.slotId
+          );
+          if (targetMed && targetSlot) {
+            scheduleSnoozeNotification(targetMed, targetSlot, payload.dateKey, minutes);
+            triggerFeedback(`Snoozed ${targetMed.name} for ${minutes} minutes`);
+          }
+        },
+      });
     });
 
     return () => sub.remove();

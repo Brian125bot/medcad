@@ -73,8 +73,7 @@ class EncryptedDatabaseAdapter {
 
     this.initPromise = (async () => {
       if (typeof window === 'undefined' || !window.indexedDB) {
-        // Fallback for SSR or non-browser environments
-        this.appliedSchemaVersion = CURRENT_DATABASE_SCHEMA_VERSION;
+        // Fallback for SSR or non-browser test environments
         this.isInitialized = true;
         return;
       }
@@ -333,6 +332,16 @@ class EncryptedDatabaseAdapter {
 
   public getAppliedSchemaVersion(): number {
     return this.appliedSchemaVersion;
+  }
+
+  public resetMemoryState(): void {
+    this.cacheMedications.clear();
+    this.cacheTimeSlots.clear();
+    this.cacheDoseLogs.clear();
+    this.cachePreferences.clear();
+    this.appliedSchemaVersion = 0;
+    this.isInitialized = false;
+    this.initPromise = null;
   }
 
   public getAllMedicationRows(): MedicationRow[] {

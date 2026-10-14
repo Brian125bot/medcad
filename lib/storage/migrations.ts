@@ -82,7 +82,10 @@ export function domainMedicationToRows(med: Medication): {
     time: slot.time,
     dose_units: slot.doseUnits ?? 1,
     reminder_enabled: slot.reminderEnabled === false ? 0 : 1,
-    lead_minutes: slot.leadMinutes ?? 0,
+    lead_minutes:
+      slot.leadMinutes !== undefined && slot.leadMinutes !== null
+        ? slot.leadMinutes
+        : null,
     created_at: now,
     updated_at: now,
   }));
@@ -126,7 +129,10 @@ export function rowsToDomainMedication(
       time: s.time,
       doseUnits: s.dose_units,
       reminderEnabled: s.reminder_enabled === 1,
-      leadMinutes: s.lead_minutes,
+      leadMinutes:
+        s.lead_minutes !== null && s.lead_minutes !== undefined
+          ? s.lead_minutes
+          : undefined,
     })),
     inventory: {
       currentUnits: medRow.inventory_current,
@@ -181,22 +187,30 @@ export async function runDatabaseMigrations(): Promise<MigrationResult> {
       const rawLegacyLogs = localStorage.getItem(LEGACY_STORAGE_LOGS_KEY);
 
       if (rawLegacyMeds) {
-        const parsedMeds = JSON.parse(rawLegacyMeds);
-        if (Array.isArray(parsedMeds) && parsedMeds.length > 0) {
-          initialMeds = parsedMeds;
-          hasLegacyData = true;
+        try {
+          const parsedMeds = JSON.parse(rawLegacyMeds);
+          if (Array.isArray(parsedMeds) && parsedMeds.length > 0) {
+            initialMeds = parsedMeds;
+            hasLegacyData = true;
+          }
+        } catch (e) {
+          console.warn('Failed to parse legacy medications during migration:', e);
         }
       }
 
       if (rawLegacyLogs) {
-        const parsedLogs = JSON.parse(rawLegacyLogs);
-        if (parsedLogs && typeof parsedLogs === 'object') {
-          initialLogs = parsedLogs;
-          hasLegacyData = true;
+        try {
+          const parsedLogs = JSON.parse(rawLegacyLogs);
+          if (parsedLogs && typeof parsedLogs === 'object') {
+            initialLogs = parsedLogs;
+            hasLegacyData = true;
+          }
+        } catch (e) {
+          console.warn('Failed to parse legacy dose logs during migration:', e);
         }
       }
     } catch (e) {
-      console.warn('Failed to parse legacy localStorage during migration:', e);
+      console.warn('Failed to access legacy localStorage during migration:', e);
     }
   }
 
@@ -213,28 +227,36 @@ export async function runDatabaseMigrations(): Promise<MigrationResult> {
   const slotRows: TimeSlotRow[] = [];
 
   for (const med of initialMeds) {
+    if (!med || !med.id) continue;
     const { medicationRow, timeSlotRows } = domainMedicationToRows(med);
     medRows.push(medicationRow);
     slotRows.push(...timeSlotRows);
   }
 
-  const logRows: DoseLogRow[] = Object.values(initialLogs).map((l) => ({
-    id: l.key || `${l.dateKey}_${l.medicationId}_${l.slotId}`,
-    date_key: l.dateKey,
-    medication_id: l.medicationId,
-    slot_id: l.slotId,
-    status: l.status,
-    logged_at: l.loggedAt,
-    note: l.note || null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }));
+  const logRows: DoseLogRow[] = Object.values(initialLogs)
+    .filter((l) => l && typeof l === 'object' && l.medicationId && l.slotId)
+    .map((l) => ({
+      id: l.key || `${l.dateKey || todayKey}_${l.medicationId}_${l.slotId}`,
+      date_key: l.dateKey || todayKey,
+      medication_id: l.medicationId,
+      slot_id: l.slotId,
+      status:
+        l.status === 'taken' || l.status === 'skipped' || l.status === 'missed'
+          ? l.status
+          : 'taken',
+      logged_at: l.loggedAt || '12:00',
+      note: l.note || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
 
   // User preferences migration (e.g. reminders and preferences)
   const prefRows: UserPreferenceRow[] = [];
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
-      const rawReminders = localStorage.getItem(LEGACY_STORAGE_REMINDERS_KEY);
+      const rawReminders =
+        localStorage.getItem('cadencerx_reminder_settings_v1') ||
+        localStorage.getItem(LEGACY_STORAGE_REMINDERS_KEY);
       if (rawReminders) {
         prefRows.push({
           id: 'pref_reminders',
@@ -243,7 +265,9 @@ export async function runDatabaseMigrations(): Promise<MigrationResult> {
           updated_at: new Date().toISOString(),
         });
       }
-      const rawSnoozed = localStorage.getItem(LEGACY_STORAGE_SNOOZED_KEY);
+      const rawSnoozed =
+        localStorage.getItem('cadencerx_snoozed_reminders_v1') ||
+        localStorage.getItem(LEGACY_STORAGE_SNOOZED_KEY);
       if (rawSnoozed) {
         prefRows.push({
           id: 'pref_snoozed',
@@ -256,6 +280,7 @@ export async function runDatabaseMigrations(): Promise<MigrationResult> {
   }
 
   // Execute relational migration transaction with AES-256-GCM encryption
+  // If executeTransaction throws, legacy data is left completely intact
   await dbAdapter.executeTransaction({
     medicationsToPut: medRows,
     timeSlotsToPut: slotRows,
@@ -272,13 +297,11 @@ export async function runDatabaseMigrations(): Promise<MigrationResult> {
   migratedSlotsCount = slotRows.length;
   migratedLogsCount = logRows.length;
 
-  // Purge legacy plaintext localStorage keys to satisfy COR-71 security constraint:
-  // "Avoid storing patient medication data in plaintext AsyncStorage/localStorage after migration"
-  if (typeof window !== 'undefined' && window.localStorage) {
+  // Purge legacy plaintext localStorage keys ONLY AFTER encrypted IndexedDB writes succeed
+  if (hasLegacyData && typeof window !== 'undefined' && window.localStorage) {
     try {
       localStorage.removeItem(LEGACY_STORAGE_MEDS_KEY);
       localStorage.removeItem(LEGACY_STORAGE_LOGS_KEY);
-      // Keep reminders config or delete if fully encapsulated in preferences
       purgedLegacy = true;
     } catch {}
   }

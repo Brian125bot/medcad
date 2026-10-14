@@ -138,10 +138,10 @@ export default function NotificationPermissionModal({
               <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-slate-800">
-                  Interactive Quick Actions:
+                  Interactive In-App Actions:
                 </span>{' '}
                 <span className="text-slate-600">
-                  Mark doses as <strong>Take Dose</strong> or <strong>Snooze 15m</strong> directly from the notification banner.
+                  Quick actions for <strong>Take Dose</strong> and <strong>Snooze 15m</strong> are available in the active alert banner when doses are due.
                 </span>
               </div>
             </div>
@@ -150,10 +150,10 @@ export default function NotificationPermissionModal({
               <ShieldCheck className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-slate-800">
-                  Offline-First Local Alarms:
+                  Local Browser Delivery:
                 </span>{' '}
                 <span className="text-slate-600">
-                  Persists across device restarts and triggers locally without an active internet connection.
+                  Delivers alerts while CadenceRx is open or in a background tab, and rehydrates upcoming reminders automatically on startup.
                 </span>
               </div>
             </div>

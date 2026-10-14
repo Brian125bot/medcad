@@ -16,7 +16,22 @@ export interface TimeSlot {
   time: string; // "HH:mm" e.g. "08:00"
   doseUnits: number; // e.g. 1 or 2 pills
   reminderEnabled?: boolean; // defaults to true if undefined
-  leadMinutes?: number; // minutes before scheduled time (0 = exact time)
+  leadMinutes?: number | null; // minutes before scheduled time (null/undefined = inherit global, 0 = exact time)
+}
+
+/**
+ * Calculates effective lead time in minutes:
+ * - Returns explicit slot override if defined and not null (e.g. 0, 5, 15).
+ * - Falls back to globalLeadMinutes when slot override is absent (null or undefined).
+ */
+export function getEffectiveLeadMinutes(
+  slotLeadMinutes?: number | null,
+  globalLeadMinutes: number = 0
+): number {
+  if (slotLeadMinutes !== undefined && slotLeadMinutes !== null) {
+    return slotLeadMinutes;
+  }
+  return globalLeadMinutes;
 }
 
 export interface MedicationInventory {

@@ -44,7 +44,7 @@ export interface TimeSlotRow {
   time: string;
   dose_units: number;
   reminder_enabled: number; // 1 or 0
-  lead_minutes: number;
+  lead_minutes?: number | null; // null/undefined = inherit global, 0 = exact time
   created_at: string;
   updated_at: string;
 }
@@ -116,7 +116,7 @@ export const SQLITE_DDL_STATEMENTS = {
       time TEXT NOT NULL,
       dose_units INTEGER NOT NULL DEFAULT 1,
       reminder_enabled INTEGER NOT NULL DEFAULT 1,
-      lead_minutes INTEGER NOT NULL DEFAULT 0,
+      lead_minutes INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (medication_id) REFERENCES medications(id) ON DELETE CASCADE

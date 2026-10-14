@@ -1,13 +1,21 @@
 /**
  * CadenceRx — WebCrypto AES-256-GCM Encryption Layer
  * 
- * Provides zero-knowledge authenticated encryption at rest for patient medication records,
- * dose logs, and personal health configuration.
+ * Threat Model & Security Posture:
+ * - Scope: Provides client-side authenticated AES-256-GCM encryption at rest for patient medication records,
+ *   dose logs, and configuration stored in local IndexedDB / SQLite tables.
+ * - Intended Defense: Protects against casual offline inspection of disk database files,
+ *   unauthenticated exports, and shared-workstation storage snooping.
+ * - Explicit Security Boundary (NOT Zero-Knowledge): Because device entropy and salt are stored in
+ *   the browser profile (localStorage), this does NOT provide zero-knowledge protection against
+ *   Cross-Site Scripting (XSS) or an attacker who has access to the browser profile directory.
+ *   True zero-knowledge protection would require a user-supplied master passphrase not saved to disk
+ *   or hardware-backed cryptographic credentials (e.g., WebAuthn / Secure Enclave).
  * 
- * Security properties:
- * - Cipher: AES-GCM with 256-bit key length
+ * Cryptographic properties:
+ * - Cipher: AES-GCM with 256-bit key length (NIST SP 800-38D)
  * - Authentication tag: 128-bit integrity verification (rejects tampering)
- * - Nonce/IV: 96-bit cryptographically secure pseudorandom number per encryption operation
+ * - Nonce/IV: Strict 96-bit (12-byte) cryptographically secure pseudorandom number per encryption operation
  * - Key Derivation: PBKDF2-HMAC-SHA256 with device-specific salt and 100,000 iterations
  * - In-memory key caching: eliminates repeated key derivation overhead (<0.5ms encrypt/decrypt)
  */
@@ -21,7 +29,7 @@ export interface EncryptedPayload {
 const VAULT_SALT_KEY = 'cadencerx_vault_salt_v1';
 const VAULT_DEVICE_ID_KEY = 'cadencerx_vault_dev_id_v1';
 const KEY_DERIVATION_ITERATIONS = 100000;
-const CURRENT_CIPHER_VERSION = 1;
+export const CURRENT_CIPHER_VERSION = 1;
 
 let cachedCryptoKey: CryptoKey | null = null;
 let keyDerivationPromise: Promise<CryptoKey> | null = null;
@@ -167,30 +175,69 @@ export async function encryptData<T>(data: T): Promise<EncryptedPayload> {
 
 /**
  * Decrypts an authenticated AES-256-GCM payload back into its typed JavaScript structure.
- * Throws an error if the payload has been corrupted or tampered with.
+ * Throws a sanitized safe error if the payload has been corrupted, tampered with, or invalid.
  */
 export async function decryptData<T>(payload: EncryptedPayload): Promise<T> {
-  if (!payload || !payload.cipherText || !payload.iv) {
-    throw new Error('Invalid encrypted payload format');
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    typeof payload.cipherText !== 'string' ||
+    !payload.cipherText ||
+    typeof payload.iv !== 'string' ||
+    !payload.iv
+  ) {
+    throw new Error('Decryption failed: invalid encrypted payload structure');
+  }
+
+  // Validate cipher version
+  if (payload.version !== CURRENT_CIPHER_VERSION) {
+    throw new Error(
+      `Decryption failed: unsupported cipher version ${payload.version} (expected ${CURRENT_CIPHER_VERSION})`
+    );
+  }
+
+  let cipherBuffer: ArrayBuffer;
+  let ivBuffer: ArrayBuffer;
+
+  try {
+    ivBuffer = base64ToBuffer(payload.iv);
+    cipherBuffer = base64ToBuffer(payload.cipherText);
+  } catch {
+    throw new Error('Decryption failed: invalid base64 encoding');
+  }
+
+  // Strictly enforce 96-bit (12-byte) IV length required for AES-GCM
+  if (ivBuffer.byteLength !== 12) {
+    throw new Error(
+      `Decryption failed: invalid IV length ${ivBuffer.byteLength} bytes (expected 12 bytes)`
+    );
+  }
+
+  // Enforce minimal length: ciphertext must at least contain the 128-bit (16-byte) authentication tag
+  if (cipherBuffer.byteLength < 16) {
+    throw new Error('Decryption failed: ciphertext truncated');
   }
 
   const key = await getEncryptionKey();
-  const cipherBuffer = base64ToBuffer(payload.cipherText);
-  const ivBuffer = base64ToBuffer(payload.iv);
 
-  const decryptedBuffer = await crypto.subtle.decrypt(
-    {
-      name: 'AES-GCM',
-      iv: new Uint8Array(ivBuffer),
-      tagLength: 128,
-    },
-    key,
-    cipherBuffer
-  );
+  try {
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: new Uint8Array(ivBuffer),
+        tagLength: 128,
+      },
+      key,
+      cipherBuffer
+    );
 
-  const decoder = new TextDecoder();
-  const jsonString = decoder.decode(decryptedBuffer);
-  return JSON.parse(jsonString) as T;
+    const decoder = new TextDecoder();
+    const jsonString = decoder.decode(decryptedBuffer);
+    return JSON.parse(jsonString) as T;
+  } catch {
+    // Reject tampered, corrupted, or invalid payload safely without leaking internal details
+    throw new Error('Decryption failed: payload is corrupted, tampered, or invalid');
+  }
 }
 
 /**

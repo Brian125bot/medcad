@@ -1,16 +1,24 @@
 /**
- * CadenceRx — Native Background Alarm & Notification Engine (COR-76)
+ * CadenceRx — Notification & Alarm Engine (COR-76)
  *
- * Implements an offline-first, persistent notification engine compatible with
- * Expo Notifications (expo-notifications) and Web Notifications API with synthesized
- * high-priority clinical audio chimes.
- *
- * Core capabilities:
- * 1. Pre-computes and schedules recurring local alarms for active medication time slots.
- * 2. Interactive action categories: "Take Dose" and "Snooze 15m".
- * 3. Reactive rescheduling on medication mutations or lead-time preference changes.
- * 4. Persistent offline trigger registry that survives app restarts.
- * 5. High-priority critical medical alert chimes via Web Audio API.
+ * Architecture & Supported Runtime Posture:
+ * 1. Runtime Scope: Next.js App Router Web Application (Desktop & Mobile Web).
+ * 2. Background Behavior:
+ *    - In-Tab & Background Tabs: Scheduled local timers and Web Notifications deliver alerts
+ *      while the application is open or running in a background browser tab.
+ *    - Web Audio Chime: Authoritative medical harmonic chime (880 Hz / 1320 Hz) synthesized via Web Audio API.
+ * 3. Platform Limitations & App/Tab Termination:
+ *    - In web browsers, JavaScript execution and page-level timers cease when a tab is closed,
+ *      terminated by the operating system, or when the host device powers down.
+ *    - Alarms CANNOT wake a terminated web browser process or device from a cold reboot without
+ *      native OS background triggers (e.g., native Expo / Android AlarmManager / iOS APNs).
+ *    - Persistent Storage & Startup Rehydration: All upcoming scheduled alarms are persisted
+ *      to offline local storage. When the user relaunches CadenceRx, rehydrateScheduledNotifications()
+ *      automatically restores and re-arms all upcoming scheduled alerts.
+ * 4. Interactive Quick Actions:
+ *    - Actions "Take Dose" (take-dose) and "Snooze 15m" (snooze-15) are handled through the
+ *      interactive notification response engine and reflected in the active alert UI banner.
+ *    - Action handlers validate payloads, deduplicate duplicate events idempotently, and update records.
  */
 
 import {
@@ -18,6 +26,7 @@ import {
   TimeSlot,
   toDateKey,
   diffDaysBetweenKeys,
+  getEffectiveLeadMinutes,
 } from './medication-data';
 
 // --- Expo Notifications Standard Types & Enums Compatibility ---
@@ -110,6 +119,15 @@ export interface NotificationResponse {
   };
 }
 
+export interface DoseActionPayload {
+  doseKey: string;
+  medicationId: string;
+  slotId: string;
+  dateKey: string;
+  snoozeMinutes?: number;
+  actionEventId?: string;
+}
+
 export type NotificationPermissionStatus =
   | 'granted'
   | 'denied'
@@ -130,27 +148,88 @@ export interface NotificationPreferences {
   leadTimeMinutes: 0 | 5 | 15;
   criticalChimeEnabled: boolean;
   hasSeenPermissionPrompt: boolean;
+  globalMute?: boolean;
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   enabled: true,
-  leadTimeMinutes: 0, // Confirmed Q2: exact time of scheduled dose
-  criticalChimeEnabled: true, // Confirmed Q3: high priority persistent critical alert chime
+  leadTimeMinutes: 0, // Exact time of scheduled dose
+  criticalChimeEnabled: true, // High priority critical alert chime
   hasSeenPermissionPrompt: false,
+  globalMute: false,
 };
 
-// Registered listeners for interactive action responses (e.g. from service worker, web notifications, or in-app triggers)
+// Registered listeners for interactive action responses
 type NotificationResponseListener = (response: NotificationResponse) => void;
 const responseListeners = new Set<NotificationResponseListener>();
 
 // In-memory active timer handles for browser alarms
 const activeTimerHandles: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
+// Idempotency set for processed action events
+const processedActionEvents = new Set<string>();
+
+/**
+ * Returns the count of currently active in-memory timers (for diagnostics and testing)
+ */
+export function getActiveNotificationTimerCount(): number {
+  return activeTimerHandles.size;
+}
+
+/**
+ * Clear processed action events (for testing)
+ */
+export function clearProcessedActionEvents(): void {
+  processedActionEvents.clear();
+}
+
+/**
+ * Validate dose action payload data safely.
+ * Returns null if data is malformed or missing required identifiers.
+ */
+export function validateDoseActionPayload(data: unknown): DoseActionPayload | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+
+  if (
+    typeof d.doseKey !== 'string' ||
+    !d.doseKey.trim() ||
+    typeof d.medicationId !== 'string' ||
+    !d.medicationId.trim() ||
+    typeof d.slotId !== 'string' ||
+    !d.slotId.trim() ||
+    typeof d.dateKey !== 'string' ||
+    !d.dateKey.trim()
+  ) {
+    return null;
+  }
+
+  return {
+    doseKey: d.doseKey.trim(),
+    medicationId: d.medicationId.trim(),
+    slotId: d.slotId.trim(),
+    dateKey: d.dateKey.trim(),
+    snoozeMinutes: typeof d.snoozeMinutes === 'number' && d.snoozeMinutes > 0 ? d.snoozeMinutes : 15,
+    actionEventId: typeof d.actionEventId === 'string' ? d.actionEventId : undefined,
+  };
+}
+
+/**
+ * Check if notification delivery is allowed based on current preferences:
+ * - Alerts must be enabled (enabled === true)
+ * - Global mute must be OFF (globalMute !== true)
+ */
+export function isNotificationDeliveryAllowed(): boolean {
+  const prefs = getNotificationPreferences();
+  if (!prefs.enabled) return false;
+  if (prefs.globalMute === true) return false;
+  return true;
+}
+
 /**
  * Initialize Notification Engine and register interactive categories
  */
 export async function initNotificationEngine(): Promise<void> {
-  // Register default notification categories (Take Dose, Snooze 15m)
   await setNotificationCategoryAsync(CATEGORY_DOSE_REMINDER, [
     {
       identifier: ACTION_TAKE_DOSE,
@@ -164,7 +243,7 @@ export async function initNotificationEngine(): Promise<void> {
     },
   ]);
 
-  // Rehydrate pending scheduled notifications from persistent storage (survives app restart)
+  // Rehydrate pending scheduled notifications from persistent storage
   rehydrateScheduledNotifications();
 }
 
@@ -180,7 +259,6 @@ export async function setNotificationCategoryAsync(
     actions,
   };
 
-  // If in browser context with service worker, register notification actions
   if (typeof window !== 'undefined' && 'localStorage' in window) {
     try {
       window.localStorage.setItem(
@@ -220,6 +298,104 @@ export function dispatchNotificationResponse(response: NotificationResponse): vo
       console.error('Error in notification response listener:', err);
     }
   }
+}
+
+/**
+ * Interactive Action Handler for Notification Responses:
+ * - Validates payload completeness (medicationId, slotId, dateKey, doseKey)
+ * - Enforces idempotency to prevent double-logging or duplicate snoozes
+ * - Handles ACTION_TAKE_DOSE and ACTION_SNOOZE_15 safely
+ */
+export function handleNotificationAction(
+  actionIdentifier: string,
+  rawPayload: unknown,
+  callbacks?: {
+    onTakeDose?: (payload: DoseActionPayload) => void;
+    onSnooze?: (payload: DoseActionPayload, minutes: number) => void;
+  }
+): { success: boolean; action: string; handled: boolean; reason?: string } {
+  const payload = validateDoseActionPayload(rawPayload);
+  if (!payload) {
+    return {
+      success: false,
+      action: actionIdentifier,
+      handled: false,
+      reason: 'Missing or malformed notification payload identifiers',
+    };
+  }
+
+  const idempotencyKey =
+    payload.actionEventId ||
+    `${actionIdentifier}_${payload.doseKey}_${payload.dateKey}`;
+
+  if (processedActionEvents.has(idempotencyKey)) {
+    return {
+      success: true,
+      action: actionIdentifier,
+      handled: false,
+      reason: 'Action event already processed (idempotent)',
+    };
+  }
+
+  if (actionIdentifier === ACTION_TAKE_DOSE) {
+    processedActionEvents.add(idempotencyKey);
+
+    // Cancel pending notification / alarm for this dose
+    cancelNotificationByDoseKey(payload.doseKey);
+
+    // Invoke callback to persist dose log and deduct inventory
+    callbacks?.onTakeDose?.(payload);
+
+    // Dispatch response to listeners
+    dispatchNotificationResponse({
+      actionIdentifier: ACTION_TAKE_DOSE,
+      notification: {
+        request: {
+          identifier: `take_${payload.doseKey}`,
+          content: {
+            title: 'Dose Taken',
+            categoryIdentifier: CATEGORY_DOSE_REMINDER,
+            data: { ...payload },
+          },
+        },
+      },
+    });
+
+    return { success: true, action: ACTION_TAKE_DOSE, handled: true };
+  }
+
+  if (actionIdentifier === ACTION_SNOOZE_15) {
+    processedActionEvents.add(idempotencyKey);
+
+    const snoozeMins = payload.snoozeMinutes || 15;
+
+    // Invoke callback to schedule snooze in state/repository
+    callbacks?.onSnooze?.(payload, snoozeMins);
+
+    // Dispatch response to listeners
+    dispatchNotificationResponse({
+      actionIdentifier: ACTION_SNOOZE_15,
+      notification: {
+        request: {
+          identifier: `snooze_${payload.doseKey}`,
+          content: {
+            title: `Dose Snoozed (${snoozeMins}m)`,
+            categoryIdentifier: CATEGORY_DOSE_REMINDER,
+            data: { ...payload, snoozeMinutes: snoozeMins },
+          },
+        },
+      },
+    });
+
+    return { success: true, action: ACTION_SNOOZE_15, handled: true };
+  }
+
+  return {
+    success: false,
+    action: actionIdentifier,
+    handled: false,
+    reason: `Unsupported action identifier: ${actionIdentifier}`,
+  };
 }
 
 /**
@@ -281,7 +457,7 @@ export function playDoseAlertChime(): void {
     osc1.start(now);
     osc1.stop(now + 0.35);
 
-    // Pulse 2: 1320 Hz (E6 - 5th harmonic above A5) for distinct clinical urgency
+    // Pulse 2: 1320 Hz (E6 - 5th harmonic above A5)
     const osc2 = ctx.createOscillator();
     const gain2 = ctx.createGain();
     osc2.type = 'triangle';
@@ -322,7 +498,6 @@ export function calculateSlotTriggerTimestamp(
   const [hh, mm] = timeHHMM.split(':').map(Number);
 
   const slotDate = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0);
-  // Subtract lead time minutes
   return slotDate.getTime() - leadMinutes * 60 * 1000;
 }
 
@@ -356,7 +531,11 @@ export function isMedicationScheduledOnDate(
 
 /**
  * Pre-computes all upcoming notification items for active medications
- * across a scheduled window (e.g., today + tomorrow).
+ * across a scheduled window (today + tomorrow).
+ *
+ * Honors lead-time priority rules:
+ * - Explicit slot override (slot.leadMinutes) takes precedence when defined (including 0m).
+ * - When slot.leadMinutes is absent (null/undefined), inherits global leadTimeMinutes (0, 5, or 15m).
  */
 export function computeUpcomingNotificationTriggers(
   medications: Medication[],
@@ -367,7 +546,6 @@ export function computeUpcomingNotificationTriggers(
   const nowDate = new Date(nowTimestamp);
   const todayKey = toDateKey(nowDate);
 
-  // Compute for today and tomorrow to cover recurring slots across midnight
   const tomorrow = new Date(nowDate);
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowKey = toDateKey(tomorrow);
@@ -382,8 +560,9 @@ export function computeUpcomingNotificationTriggers(
       for (const slot of med.timeSlots) {
         if (slot.reminderEnabled === false) continue;
 
-        // Individual slot lead time overrides global preference if set
-        const slotLead = slot.leadMinutes ?? leadTimeMinutes;
+        // Effective lead time calculation:
+        // Explicit slot override takes precedence; falls back to global preference
+        const slotLead = getEffectiveLeadMinutes(slot.leadMinutes, leadTimeMinutes);
         const triggerTime = calculateSlotTriggerTimestamp(
           dateKey,
           slot.time,
@@ -413,33 +592,33 @@ export function computeUpcomingNotificationTriggers(
     }
   }
 
-  // Sort by trigger timestamp ascending
   return results.sort((a, b) => a.triggerTimestamp - b.triggerTimestamp);
 }
 
 /**
  * Reschedule all medication reminders reactively.
- * Called whenever:
- * - A medication is created, edited, paused, or deleted.
- * - The user changes their lead-time alert preference.
+ * Cancels existing timers, re-checks preferences, re-arms upcoming alarms,
+ * and updates persistent storage.
  */
 export async function rescheduleAllMedicationReminders(
   medications: Medication[],
   leadTimeMinutes: number = 0
 ): Promise<ScheduledNotificationItem[]> {
-  // Clear any existing timer handles
   clearAllActiveNotificationTimers();
 
-  // Compute new upcoming notification items
+  // If notifications are disabled or globally muted, persist empty schedule and exit
+  if (!isNotificationDeliveryAllowed()) {
+    persistScheduledNotifications([]);
+    return [];
+  }
+
   const upcoming = computeUpcomingNotificationTriggers(
     medications,
     leadTimeMinutes
   );
 
-  // Persist to local offline storage registry (survives restarts)
   persistScheduledNotifications(upcoming);
 
-  // Arm active timers for upcoming notifications
   const now = Date.now();
   for (const item of upcoming) {
     const delayMs = Math.max(0, item.triggerTimestamp - now);
@@ -457,7 +636,11 @@ export function scheduleSnoozeNotification(
   slot: TimeSlot,
   dateKey: string,
   snoozeMinutes: number = 15
-): ScheduledNotificationItem {
+): ScheduledNotificationItem | null {
+  if (!isNotificationDeliveryAllowed()) {
+    return null;
+  }
+
   const triggerTime = Date.now() + snoozeMinutes * 60 * 1000;
   const doseKey = `${dateKey}_${medication.id}_${slot.id}`;
   const snoozeItem: ScheduledNotificationItem = {
@@ -476,15 +659,37 @@ export function scheduleSnoozeNotification(
     status: 'snoozed',
   };
 
-  // Add to persistent scheduled list
   const current = getScheduledNotifications();
-  const updated = [...current, snoozeItem];
+  // Filter out any existing snooze for the same doseKey to ensure exactly one snooze alert
+  const remaining = current.filter((n) => !(n.doseKey === doseKey && n.status === 'snoozed'));
+  const updated = [...remaining, snoozeItem];
   persistScheduledNotifications(updated);
 
-  // Arm timer
   armNotificationTimer(snoozeItem, snoozeMinutes * 60 * 1000);
 
   return snoozeItem;
+}
+
+/**
+ * Cancel notifications for a specific doseKey
+ */
+export function cancelNotificationByDoseKey(doseKey: string): void {
+  const current = getScheduledNotifications();
+  const remaining: ScheduledNotificationItem[] = [];
+
+  for (const item of current) {
+    if (item.doseKey === doseKey) {
+      const handle = activeTimerHandles.get(item.id);
+      if (handle) {
+        clearTimeout(handle);
+        activeTimerHandles.delete(item.id);
+      }
+    } else {
+      remaining.push(item);
+    }
+  }
+
+  persistScheduledNotifications(remaining);
 }
 
 /**
@@ -508,13 +713,22 @@ export function cancelMedicationNotifications(medicationId: string): void {
 }
 
 /**
- * Cancel all scheduled notifications
+ * Cancel all active notification timers in memory
  */
 export function clearAllActiveNotificationTimers(): void {
   for (const [, handle] of activeTimerHandles.entries()) {
     clearTimeout(handle);
   }
   activeTimerHandles.clear();
+}
+
+/**
+ * Fully cancel all scheduled notifications and clear persistent storage
+ * (Called when user disables browser alerts or activates global mute)
+ */
+export function cancelAllScheduledNotifications(): void {
+  clearAllActiveNotificationTimers();
+  persistScheduledNotifications([]);
 }
 
 /**
@@ -532,17 +746,49 @@ function armNotificationTimer(
     activeTimerHandles.delete(item.id);
   }, delayMs);
 
+  // In Node.js test runners, unref the timer handle so it doesn't block process exit
+  if (
+    typeof handle === 'object' &&
+    handle !== null &&
+    'unref' in handle &&
+    typeof (handle as any).unref === 'function'
+  ) {
+    (handle as any).unref();
+  }
+
   activeTimerHandles.set(item.id, handle);
 }
 
 /**
- * Trigger the actual notification delivery (Web Notification + Audio Chime + Response Listener)
+ * Trigger the actual notification delivery.
+ *
+ * CRITICAL SAFETY CHECK: Re-verifies current preferences dynamically
+ * before playing audio or creating a browser notification.
+ * Returns false if delivery is suppressed (alerts disabled, global mute, or item cancelled).
  */
-export function triggerLocalNotification(item: ScheduledNotificationItem): void {
-  // 1. Play high-priority critical chime
-  playDoseAlertChime();
+export function triggerLocalNotification(
+  item: ScheduledNotificationItem
+): boolean {
+  // 1. Re-check current preferences immediately prior to delivery
+  if (!isNotificationDeliveryAllowed()) {
+    return false;
+  }
 
-  // 2. Dispatch native Web Notification if permission granted
+  // 2. Check if item was cancelled or removed from registry
+  const current = getScheduledNotifications();
+  const exists = current.find((n) => n.id === item.id);
+  if (!exists || exists.status === 'cancelled') {
+    return false;
+  }
+
+  const prefs = getNotificationPreferences();
+
+  // 3. Play high-priority critical chime if enabled
+  if (prefs.criticalChimeEnabled) {
+    playDoseAlertChime();
+  }
+
+  // 4. Dispatch Web Notification if permission granted
   if (
     typeof window !== 'undefined' &&
     'Notification' in window &&
@@ -557,7 +803,7 @@ export function triggerLocalNotification(item: ScheduledNotificationItem): void 
         icon: '/favicon.ico',
         tag: item.doseKey,
         badge: '/favicon.ico',
-        requireInteraction: true, // Keep notification visible until patient interacts
+        requireInteraction: true,
         data: {
           doseKey: item.doseKey,
           medicationId: item.medicationId,
@@ -575,12 +821,13 @@ export function triggerLocalNotification(item: ScheduledNotificationItem): void 
     }
   }
 
-  // 3. Mark status in storage registry
-  const current = getScheduledNotifications();
+  // 5. Mark status as 'fired' in registry
   const updated = current.map((n) =>
     n.id === item.id ? { ...n, status: 'fired' as const } : n
   );
   persistScheduledNotifications(updated);
+
+  return true;
 }
 
 /**
@@ -602,7 +849,7 @@ export function getScheduledNotifications(): ScheduledNotificationItem[] {
 /**
  * Persist scheduled notifications to local storage
  */
-function persistScheduledNotifications(
+export function persistScheduledNotifications(
   items: ScheduledNotificationItem[]
 ): void {
   if (typeof window === 'undefined' || !('localStorage' in window)) {
@@ -619,22 +866,31 @@ function persistScheduledNotifications(
 }
 
 /**
- * Rehydrate scheduled notifications after device restart
+ * Rehydrate scheduled notifications after application restart/reload
  */
-export function rehydrateScheduledNotifications(): void {
+export function rehydrateScheduledNotifications(): ScheduledNotificationItem[] {
+  clearAllActiveNotificationTimers();
+
+  if (!isNotificationDeliveryAllowed()) {
+    return [];
+  }
+
   const current = getScheduledNotifications();
   const now = Date.now();
-
-  clearAllActiveNotificationTimers();
+  const rearmed: ScheduledNotificationItem[] = [];
 
   for (const item of current) {
     if (item.status === 'scheduled' || item.status === 'snoozed') {
       const delayMs = item.triggerTimestamp - now;
+      // Only re-arm future triggers; do not erroneously fire past stale triggers
       if (delayMs > 0) {
         armNotificationTimer(item, delayMs);
+        rearmed.push(item);
       }
     }
   }
+
+  return rearmed;
 }
 
 /**

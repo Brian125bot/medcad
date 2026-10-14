@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "check": "tsc --noEmit",
+    "test": "npx tsx tests/run-all-tests.ts",
     "clean": "next clean"
   },
   "dependencies": {
