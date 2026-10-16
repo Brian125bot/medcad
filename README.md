@@ -36,7 +36,7 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test
 - **Not built yet:** the Today screen, Insights, Cabinet, notifications, sync.
 - **Heads-up:** nothing has been run on a real device yet (COR-88, COR-91).
   Bundling was restored in COR-90 (`SpaceMono-Regular.ttf` in `mobile/assets/fonts/`).
-- **There is no CI.** The command above is the only gate.
+- **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the mobile gate on every pull request and push to `main`: `npm ci`, `tsc --noEmit`, `typecheck:storage`, lint, `npm test` (100 % coverage gate), `test:tz` and `expo export` for iOS, Android and web, on Node 22. The web prototype is not checked in CI.
 
 ## Web prototype
 

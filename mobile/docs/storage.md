@@ -137,7 +137,8 @@ a current behaviour, not necessarily a desired one — open items are in the
 Linear COR-71 requires local encrypted write latency below **15ms**. `repository.runBenchmark()` times the full encrypt + SQLite `INSERT` path (`encryptDoseLogRow` + `driver.run`), indexed single-row read, and a 5-row encrypted batch transaction:
 
 > **⚠️ These numbers are local desktop runs. They are not CI numbers and they are not device numbers.**
-> This repository has **no CI** (`.github/` does not exist), so no "CI value" for this benchmark can exist.
+> CI (GitHub Actions) runs the storage tests on Linux runners, but those are not device numbers either; no CI
+> figure is a substitute for the device measurement.
 > The figures below come from running the benchmark on a developer machine (Node + `node:sqlite`), which
 > does **not** satisfy the COR-71 acceptance criterion *"write latency < 15ms"* — that criterion is defined
 > for the native mobile storage layer (`expo-sqlite` + `expo-crypto` + `expo-secure-store`) on a physical
