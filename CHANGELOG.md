@@ -6,7 +6,8 @@ All notable changes to this repository. The format follows
 **No version has ever been tagged**, and `mobile/` has not shipped, so there are
 no release numbers or compare links yet. Until the first release:
 
-- `[Unreleased]` lists work that is **not on `main` yet** (open PRs / branches).
+- `[Unreleased]` lists work on `main` that has **not been released yet** (there
+  is no release so far, so this is everything since the start).
 - **Pre-release history** below records what has landed on `main`, grouped by
   Linear issue (`COR-nn`), newest first. Dates are commit dates.
 - When a version is cut, move the relevant entries under a `## [x.y.z] - date`

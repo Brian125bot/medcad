@@ -31,7 +31,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-73 | Bottom tab navigation and headers | 3 | Backlog | Blocks COR-74, COR-78, COR-80 |
 | COR-74 | Daily protocol screen with swipe gestures | 5 | Backlog | Urgent. Blocked by COR-71 ✔, COR-72 ✔, **COR-73**; blocks COR-77 |
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
-| COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | Backlog | **Overlaps PR #8** — see below |
+| COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | Backlog | **Overlaps PR #8** (merged) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | Backlog | **Blocks every device build** |
 | COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Blocked by COR-90 |
 | COR-93 | Handle `dose_logs` for slots removed in edit | 2 | Backlog | Also fixes the undo drift below |
@@ -78,13 +78,13 @@ Points are Linear estimates. "Done" means closed in Linear.
 Only dependencies seen in Linear are listed; other issues may have relations
 that are not recorded here.
 
-## In flight
+## Recently merged
 
-- **PR #8 — `fix/cor-75-wizard-followups`** (not merged at the time of writing).
+- **PR #8 — `fix/cor-75-wizard-followups`** (merged to `main` as `0dbe450`).
   It (1) persists the pill look, (2) accepts `.5` and comma decimals, and
   (3) makes `npm run lint` work. Everything in these docs that mentions
   `Medication.appearance`, `isPillAppearance`, the comma-decimal rule or
-  `eslint.config.js` describes this PR; **it is not on `main` until it merges.**
+  `eslint.config.js` is on `main`.
   - It covers COR-92 in full.
   - It covers the *intent* of COR-89 but **not its stated design**: COR-89 asks
     for a schema v2 migration, whereas PR #8 stores the look inside the
