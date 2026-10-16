@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { createStorageContext } from '../lib/storage/context';
 import { domainMedicationToRows, rowsToDomainMedication } from '../lib/storage/mappers';
-import { memoryKeystore, nodeCipher, nodeSqlDriver, VaultIntegrityError } from '../lib/storage/test-fixture';
+import { memoryKeystore, nodeCipher, nodeSqlDriver, VaultIntegrityError } from './fixtures';
 import type { Medication } from '../lib/domain/medication-data';
 
 console.log('=== repository.test ===');

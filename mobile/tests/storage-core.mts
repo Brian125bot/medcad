@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { memoryKeystore, nodeCipher, nodeSqlDriver, VaultIntegrityError } from '../lib/storage/test-fixture';
+import { memoryKeystore, nodeCipher, nodeSqlDriver, VaultIntegrityError } from './fixtures';
 import { DDL_STATEMENTS } from '../lib/storage/schema';
 
 async function main() {

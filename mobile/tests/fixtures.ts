@@ -1,6 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { CipherPort, SecureKeyStore, SqlDriver, SqlValue } from './ports';
+import type { CipherPort, SecureKeyStore, SqlDriver, SqlValue } from '../lib/storage/ports';
 
 export class VaultIntegrityError extends Error {
   constructor(message = 'Encrypted payload is corrupted, tampered with, or invalid') {
@@ -13,6 +13,9 @@ export function nodeCipher(): CipherPort {
   return {
     async generateKey(): Promise<Uint8Array> {
       return new Uint8Array(randomBytes(32));
+    },
+    async randomBytes(length: number): Promise<Uint8Array> {
+      return new Uint8Array(randomBytes(length));
     },
     async seal(plaintext: Uint8Array, key: Uint8Array): Promise<string> {
       const iv = randomBytes(12);
@@ -72,5 +75,21 @@ export function nodeSqlDriver(name = ':memory:'): SqlDriver {
         throw error;
       }
     },
+    async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+      // node:sqlite is synchronous under the hood; still serialize through a
+      // mutex so tests exercise the same single-writer discipline as the app.
+      return runExclusiveGate(fn);
+    },
+    async close(): Promise<void> {
+      db.close();
+    },
   };
+}
+
+let fixtureGate: Promise<unknown> = Promise.resolve();
+
+async function runExclusiveGate<T>(fn: () => Promise<T>): Promise<T> {
+  const run = fixtureGate.then(fn, fn);
+  fixtureGate = run.catch(() => undefined);
+  return run as Promise<T>;
 }

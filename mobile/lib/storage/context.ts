@@ -1,6 +1,6 @@
 import type { CipherPort, SecureKeyStore, SqlDriver } from './ports';
 import type { MedicationRow, TimeSlotRow, DoseLogRow, UserPreferenceRow, SchemaVersionRecord } from './schema';
-import { CURRENT_DATABASE_SCHEMA_VERSION, DDL_STATEMENTS } from './schema';
+import { CURRENT_DATABASE_SCHEMA_VERSION, DATABASE_NAME, DDL_STATEMENTS } from './schema';
 
 export const VAULT_KEY_ID = 'cadencerx.vault.key.v1';
 export const VAULT_KEYSTORE_SERVICE = 'app.cadencerx.vault';
@@ -56,15 +56,47 @@ function decodeUtf8(value: Uint8Array): string {
 }
 
 function toBase64(bytes: Uint8Array): string {
+  // React Native has no Buffer: build base64 from a binary string in chunks
+  // (avoids call-stack blowup from String.fromCharCode(...largeArray)).
   let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return Buffer.from(binary, 'binary').toString('base64');
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let out = '';
+  for (let i = 0; i < binary.length; i += 3) {
+    const a = binary.charCodeAt(i);
+    const b = i + 1 < binary.length ? binary.charCodeAt(i + 1) : 0;
+    const c = i + 2 < binary.length ? binary.charCodeAt(i + 2) : 0;
+    const triple = (a << 16) | (b << 8) | c;
+    out +=
+      chars[(triple >> 18) & 63] +
+      chars[(triple >> 12) & 63] +
+      (i + 1 < binary.length ? chars[(triple >> 6) & 63] : '=') +
+      (i + 2 < binary.length ? chars[triple & 63] : '=');
+  }
+  return out;
 }
 
 function fromBase64(base64: string): Uint8Array {
-  return Uint8Array.from(Buffer.from(base64, 'base64'));
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Map<string, number>();
+  for (let i = 0; i < chars.length; i += 1) lookup.set(chars[i], i);
+  const clean = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  if (clean.length % 4 !== 0) throw new VaultIntegrityError('Stored vault key has invalid encoding');
+  const bytes: number[] = [];
+  for (let i = 0; i < clean.length; i += 4) {
+    const a = lookup.get(clean[i]) ?? 0;
+    const b = lookup.get(clean[i + 1]) ?? 0;
+    const c = clean[i + 2] === '=' ? 0 : (lookup.get(clean[i + 2]) ?? 0);
+    const d = clean[i + 3] === '=' ? 0 : (lookup.get(clean[i + 3]) ?? 0);
+    const triple = (a << 18) | (b << 12) | (c << 6) | d;
+    bytes.push((triple >> 16) & 255);
+    if (clean[i + 2] !== '=') bytes.push((triple >> 8) & 255);
+    if (clean[i + 3] !== '=') bytes.push(triple & 255);
+  }
+  return Uint8Array.from(bytes);
 }
 
 async function sealJson(cipher: CipherPort, key: Uint8Array, value: unknown): Promise<string> {
@@ -85,9 +117,20 @@ async function openText(cipher: CipherPort, key: Uint8Array, sealed: string): Pr
   return decodeUtf8(await cipher.open(sealed, key));
 }
 
-interface VaultKeyEnvelope {
-  v: 1;
-  k: string;
+export const VAULT_CANARY_TABLE = '__vault_canary__';
+export const VAULT_CANARY_ROW_ID = 'canary';
+export const VAULT_AUTH_TAG = 'cadencerx-vault-auth-v1';
+
+async function readTableCount(driver: SqlDriver, table: string): Promise<number> {
+  const row = await driver.get<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table}`);
+  return row?.count ?? 0;
+}
+
+async function vaultHasEncryptedRows(driver: SqlDriver): Promise<boolean> {
+  for (const table of ['medications', 'time_slots', 'dose_logs', 'user_preferences']) {
+    if ((await readTableCount(driver, table)) > 0) return true;
+  }
+  return false;
 }
 
 export interface StoragePlatform {
@@ -96,11 +139,16 @@ export interface StoragePlatform {
   keystore: SecureKeyStore;
 }
 
+export interface VaultKeyEnvelope {
+  v: 1;
+  k: string;
+}
+
 export interface StorageContext {
   repository: MedicationRepository;
   validateVault(): Promise<boolean>;
   deleteVault(): Promise<void>;
-  migrateIfNeeded(seedTodayKey?: string): Promise<void>;
+  migrateIfNeeded(options?: { seedTodayKey?: string; allowSeed?: boolean }): Promise<void>;
 }
 
 interface MedicationsTableRow extends MedicationRow {}
@@ -249,13 +297,48 @@ export class MedicationRepository {
 
   constructor(private readonly platform: StoragePlatform) {}
 
+  /** For tests only: drop the in-memory key without touching the keystore (simulates app restart). */
+  public forgetCachedKeyForTests(): void {
+    this.keyringState.key = null;
+    this.keyringState.promise = null;
+  }
+
+  /** Returns true when the stored key decrypts the stored canary; false when no key/canary exists yet. */
+  private async verifyKeyAgainstCanary(key: Uint8Array): Promise<boolean> {
+    const sealed = await this.platform.driver.get<{ sealed: string }>(
+      `SELECT sealed FROM ${VAULT_CANARY_TABLE} WHERE id = ?`,
+      [VAULT_CANARY_ROW_ID],
+    );
+    if (!sealed) return false;
+    try {
+      const bytes = await this.platform.cipher.open(sealed.sealed, key);
+      return decodeUtf8(bytes) === VAULT_AUTH_TAG;
+    } catch (error) {
+      if (error instanceof VaultIntegrityError) return false;
+      throw error;
+    }
+  }
+
+  private async writeKeyAndCanary(key: Uint8Array): Promise<void> {
+    const envelope: VaultKeyEnvelope = { v: 1, k: toBase64(key) };
+    const canary = await this.platform.cipher.seal(encodeUtf8(VAULT_AUTH_TAG), key);
+    await this.platform.driver.transaction(async () => {
+      await this.platform.driver.run(
+        `INSERT INTO ${VAULT_CANARY_TABLE} (id, sealed, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET sealed=excluded.sealed, updated_at=excluded.updated_at`,
+        [VAULT_CANARY_ROW_ID, canary, nowIso()],
+      );
+    });
+    await this.platform.keystore.setItem(VAULT_KEY_ID, JSON.stringify(envelope));
+  }
+
   private async getKey(): Promise<Uint8Array> {
     if (this.keyringState.key) return this.keyringState.key;
     if (this.keyringState.promise) return this.keyringState.promise;
 
     this.keyringState.promise = (async () => {
       const raw = await this.platform.keystore.getItem(VAULT_KEY_ID);
-      let key: Uint8Array;
+      let key: Uint8Array | null = null;
       if (raw) {
         try {
           const envelope = JSON.parse(raw) as VaultKeyEnvelope;
@@ -266,8 +349,50 @@ export class MedicationRepository {
           if (error instanceof VaultIntegrityError) throw error;
           throw new VaultIntegrityError('Stored vault key is corrupted');
         }
+        // Stored key must prove itself against the canary before use.
+        const canary = await this.platform.driver.get<{ sealed: string }>(
+          `SELECT sealed FROM ${VAULT_CANARY_TABLE} WHERE id = ?`,
+          [VAULT_CANARY_ROW_ID],
+        );
+        if (canary) {
+          let ok = false;
+          try {
+            ok = decodeUtf8(await this.platform.cipher.open(canary.sealed, key)) === VAULT_AUTH_TAG;
+          } catch {
+            ok = false;
+          }
+          if (!ok) {
+            const { VaultKeyMissingError } = await import('./ports');
+            throw new VaultKeyMissingError(
+              'Stored vault key does not match this vault. Refusing to overwrite encrypted data.',
+            );
+          }
+        } else if (await vaultHasEncryptedRows(this.platform.driver)) {
+          // Keystore entry exists but the canary is gone while rows remain: cannot
+          // prove the key is correct, so refuse rather than silently minting a new key.
+          const { VaultKeyMissingError } = await import('./ports');
+          throw new VaultKeyMissingError(
+            'Vault canary is missing while encrypted rows exist. Refusing to create a new key.',
+          );
+        }
+      } else if (await vaultHasEncryptedRows(this.platform.driver)) {
+        // Key lost (restore, wiped Keychain): NEVER silently rotate — every row
+        // would become unreadable. Surface it so the app can offer reset/recovery.
+        const { VaultKeyMissingError } = await import('./ports');
+        throw new VaultKeyMissingError(
+          'Vault key is missing while encrypted data still exists. Refusing to create a new key.',
+        );
       } else {
+        // Genuine first launch: no key and no rows — safe to provision.
         key = await this.platform.cipher.generateKey();
+        const canary = await this.platform.cipher.seal(encodeUtf8(VAULT_AUTH_TAG), key);
+        await this.platform.driver.transaction(async () => {
+          await this.platform.driver.run(
+            `INSERT INTO ${VAULT_CANARY_TABLE} (id, sealed, updated_at) VALUES (?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET sealed=excluded.sealed, updated_at=excluded.updated_at`,
+            [VAULT_CANARY_ROW_ID, canary, nowIso()],
+          );
+        });
         const envelope: VaultKeyEnvelope = { v: 1, k: toBase64(key) };
         await this.platform.keystore.setItem(VAULT_KEY_ID, JSON.stringify(envelope));
       }
@@ -286,11 +411,20 @@ export class MedicationRepository {
     if (this.initialized) return;
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = (async () => {
-      await this.platform.driver.open('cadencerx.db');
+      await this.platform.driver.open(DATABASE_NAME);
       await migrateStorage(this.platform);
       this.initialized = true;
     })();
     return this.readyPromise;
+  }
+
+  /** Close the underlying database handle (app backgrounding / tests). */
+  public async close(): Promise<void> {
+    this.initialized = false;
+    this.readyPromise = null;
+    this.keyringState.key = null;
+    this.keyringState.promise = null;
+    await this.platform.driver.close();
   }
 
   private async putMedicationAndSlots(
@@ -503,8 +637,27 @@ export class MedicationRepository {
   }
 
   public async getDoseLogsByDate(dateKey: string) {
-    const logs = await this.getAllDoseLogs();
-    return Object.values(logs).filter((log) => log.dateKey === dateKey);
+    await this.ensureReady();
+    const key = await this.getKey();
+    const rows = await this.platform.driver.all<DoseLogRow>(
+      'SELECT * FROM dose_logs WHERE date_key = ? ORDER BY logged_at ASC',
+      [dateKey],
+    );
+    return Promise.all(
+      rows.map(async (row) => {
+        const decrypted = await decryptDoseLogRow(this.platform.cipher, key, row);
+        return {
+          id: row.id,
+          key: row.id,
+          dateKey: row.date_key,
+          medicationId: row.medication_id,
+          slotId: row.slot_id,
+          status: row.status,
+          loggedAt: row.logged_at,
+          note: decrypted.note || undefined,
+        };
+      }),
+    );
   }
 
   public async logDose(
@@ -514,26 +667,144 @@ export class MedicationRepository {
     status: 'taken' | 'skipped' | 'missed',
     note?: string,
   ) {
-    await this.ensureReady();
     const { buildDoseKey } = await import('../domain/medication-data');
-    const key = await this.getKey();
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
-    const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
-    const medication = await this.getMedicationById(medicationId);
-    const slot = medication?.timeSlots.find((item) => item.id === slotId);
-    const doseUnits = slot?.doseUnits ?? 1;
-    const wasTaken = existing?.status === 'taken';
     const willBeTaken = status === 'taken';
 
-    let updatedMedication = medication ?? undefined;
-    await this.platform.driver.transaction(async () => {
+    // Single-writer gate: read-modify-write must not interleave (double-tap safety).
+    return this.platform.driver.runExclusive(async () => {
+      await this.ensureReady();
+      const key = await this.getKey();
+      const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
+      const medication = await this.getMedicationById(medicationId);
+      const slot = medication?.timeSlots.find((item) => item.id === slotId);
+      const doseUnits = slot?.doseUnits ?? 1;
+      const wasTaken = existing?.status === 'taken';
+
+      let updatedMedication = medication ?? undefined;
+      await this.platform.driver.transaction(async () => {
+        const logRow: DoseLogRow & { note?: string | null } = {
+          id: doseKey,
+          date_key: dateKey,
+          medication_id: medicationId,
+          slot_id: slotId,
+          status,
+          logged_at: hhMm(),
+          created_at: existing?.created_at || nowIso(),
+          updated_at: nowIso(),
+          enc_payload: '',
+          note: note ?? null,
+        };
+        const encrypted = await encryptDoseLogRow(this.platform.cipher, key, logRow);
+        await this.platform.driver.run(
+          `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET status=excluded.status, logged_at=excluded.logged_at, updated_at=excluded.updated_at, enc_payload=excluded.enc_payload`,
+          [
+            encrypted.id,
+            encrypted.date_key,
+            encrypted.medication_id,
+            encrypted.slot_id,
+            encrypted.status,
+            encrypted.logged_at,
+            encrypted.created_at,
+            encrypted.updated_at,
+            encrypted.enc_payload,
+          ],
+        );
+
+        if (medication && wasTaken !== willBeTaken) {
+          const delta = willBeTaken ? -doseUnits : doseUnits;
+          const current = await this.getMedicationRow(medicationId);
+          if (current) {
+            await this.platform.driver.run(
+              'UPDATE medications SET inventory_current = ?, updated_at = ? WHERE id = ?',
+              [Math.max(0, current.inventory_current + delta), nowIso(), medicationId],
+            );
+          }
+        }
+      });
+
+      if (medication && wasTaken !== willBeTaken) {
+        updatedMedication = (await this.getMedicationById(medicationId)) ?? undefined;
+      }
+
+      const log: import('../domain/medication-data').DoseLogItem = {
+        id: doseKey,
+        key: doseKey,
+        dateKey,
+        medicationId,
+        slotId,
+        status,
+        loggedAt: hhMm(),
+        note,
+      };
+      return { log, updatedMedication };
+    });
+  }
+
+  public async undoDose(dateKey: string, medicationId: string, slotId: string) {
+    const { buildDoseKey } = await import('../domain/medication-data');
+    const doseKey = buildDoseKey(dateKey, medicationId, slotId);
+
+    return this.platform.driver.runExclusive(async () => {
+      await this.ensureReady();
+      const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
+      const medication = await this.getMedicationById(medicationId);
+      const slot = medication?.timeSlots.find((item) => item.id === slotId);
+      const doseUnits = slot?.doseUnits ?? 1;
+
+      await this.platform.driver.transaction(async () => {
+        await this.platform.driver.run('DELETE FROM dose_logs WHERE id = ?', [doseKey]);
+        if (existing?.status === 'taken' && medication) {
+          const current = await this.getMedicationRow(medicationId);
+          if (current) {
+            await this.platform.driver.run(
+              'UPDATE medications SET inventory_current = ?, updated_at = ? WHERE id = ?',
+              [current.inventory_current + doseUnits, nowIso(), medicationId],
+            );
+          }
+        }
+      });
+
+      const updatedMedication =
+        existing?.status === 'taken' ? ((await this.getMedicationById(medicationId)) ?? undefined) : medication ?? undefined;
+      return { undoneKey: doseKey, updatedMedication };
+    });
+  }
+
+  public async bulkSaveDoseLogs(logs: import('../domain/medication-data').DoseLogMap): Promise<void> {
+    for (const log of Object.values(logs)) {
+      await this.logDose(log.dateKey, log.medicationId, log.slotId, log.status, log.note);
+    }
+  }
+
+  /**
+   * Seeding/admin variant of logDose that preserves the caller's loggedAt instead
+   * of stamping "now". Writes the row directly WITHOUT touching inventory
+   * (historical demo logs must never drain stock). Not for UI dose logging.
+   */
+  public async logDoseAt(
+    dateKey: string,
+    medicationId: string,
+    slotId: string,
+    status: 'taken' | 'skipped' | 'missed',
+    loggedAt: string,
+    note?: string,
+  ) {
+    const { buildDoseKey } = await import('../domain/medication-data');
+    const doseKey = buildDoseKey(dateKey, medicationId, slotId);
+    return this.platform.driver.runExclusive(async () => {
+      await this.ensureReady();
+      const key = await this.getKey();
+      const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
       const logRow: DoseLogRow & { note?: string | null } = {
         id: doseKey,
         date_key: dateKey,
         medication_id: medicationId,
         slot_id: slotId,
         status,
-        logged_at: hhMm(),
+        logged_at: loggedAt,
         created_at: existing?.created_at || nowIso(),
         updated_at: nowIso(),
         enc_payload: '',
@@ -556,67 +827,8 @@ export class MedicationRepository {
           encrypted.enc_payload,
         ],
       );
-
-      if (medication && wasTaken !== willBeTaken) {
-        const delta = willBeTaken ? -doseUnits : doseUnits;
-        const current = await this.getMedicationRow(medicationId);
-        if (current) {
-          await this.platform.driver.run(
-            'UPDATE medications SET inventory_current = ?, updated_at = ? WHERE id = ?',
-            [Math.max(0, current.inventory_current + delta), nowIso(), medicationId],
-          );
-        }
-      }
+      return { logKey: doseKey };
     });
-
-    if (medication && wasTaken !== willBeTaken) {
-      updatedMedication = (await this.getMedicationById(medicationId)) ?? undefined;
-    }
-
-    const log: import('../domain/medication-data').DoseLogItem = {
-      id: doseKey,
-      key: doseKey,
-      dateKey,
-      medicationId,
-      slotId,
-      status,
-      loggedAt: hhMm(),
-      note,
-    };
-    return { log, updatedMedication };
-  }
-
-  public async undoDose(dateKey: string, medicationId: string, slotId: string) {
-    await this.ensureReady();
-    const { buildDoseKey } = await import('../domain/medication-data');
-    const doseKey = buildDoseKey(dateKey, medicationId, slotId);
-    const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
-    const medication = await this.getMedicationById(medicationId);
-    const slot = medication?.timeSlots.find((item) => item.id === slotId);
-    const doseUnits = slot?.doseUnits ?? 1;
-
-    await this.platform.driver.transaction(async () => {
-      await this.platform.driver.run('DELETE FROM dose_logs WHERE id = ?', [doseKey]);
-      if (existing?.status === 'taken' && medication) {
-        const current = await this.getMedicationRow(medicationId);
-        if (current) {
-          await this.platform.driver.run(
-            'UPDATE medications SET inventory_current = ?, updated_at = ? WHERE id = ?',
-            [current.inventory_current + doseUnits, nowIso(), medicationId],
-          );
-        }
-      }
-    });
-
-    const updatedMedication =
-      existing?.status === 'taken' ? ((await this.getMedicationById(medicationId)) ?? undefined) : medication ?? undefined;
-    return { undoneKey: doseKey, updatedMedication };
-  }
-
-  public async bulkSaveDoseLogs(logs: import('../domain/medication-data').DoseLogMap): Promise<void> {
-    for (const log of Object.values(logs)) {
-      await this.logDose(log.dateKey, log.medicationId, log.slotId, log.status, log.note);
-    }
   }
 
   public async getPreference<T>(prefKey: string, defaultValue: T): Promise<T> {
@@ -687,7 +899,8 @@ export class MedicationRepository {
   public async runBenchmark(): Promise<StorageBenchmarkResult> {
     await this.ensureReady();
     const key = await this.getKey();
-    const testId = `bench_${Date.now()}`;
+    const stamp = Date.now();
+    const testId = `bench_${stamp}`;
     const row: DoseLogRow & { note?: string | null } = {
       id: testId,
       date_key: '2026-10-14',
@@ -700,22 +913,22 @@ export class MedicationRepository {
       enc_payload: '',
       note: 'Latency benchmark test entry',
     };
-    const encrypted = await encryptDoseLogRow(this.platform.cipher, key, row);
-
+    // Time the FULL write path (encryption + SQLite write), which is what AC #2 means.
     const writeStart = performance.now();
+    const sealedPayload = await encryptDoseLogRow(this.platform.cipher, key, row);
     await this.platform.driver.run(
       `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        encrypted.id,
-        encrypted.date_key,
-        encrypted.medication_id,
-        encrypted.slot_id,
-        encrypted.status,
-        encrypted.logged_at,
-        encrypted.created_at,
-        encrypted.updated_at,
-        encrypted.enc_payload,
+        sealedPayload.id,
+        sealedPayload.date_key,
+        sealedPayload.medication_id,
+        sealedPayload.slot_id,
+        sealedPayload.status,
+        sealedPayload.logged_at,
+        sealedPayload.created_at,
+        sealedPayload.updated_at,
+        sealedPayload.enc_payload,
       ],
     );
     const writeLatencyMs = Math.round((performance.now() - writeStart) * 100) / 100;
@@ -727,19 +940,26 @@ export class MedicationRepository {
     const batchStart = performance.now();
     await this.platform.driver.transaction(async () => {
       for (let index = 0; index < 5; index += 1) {
+        const batchRow = await encryptDoseLogRow(this.platform.cipher, key, {
+          ...row,
+          id: `bench_batch_${stamp}_${index}`,
+          medication_id: `bench-med-${index}`,
+          slot_id: `slot-${index}`,
+          logged_at: '10:00',
+        });
         await this.platform.driver.run(
           `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            `bench_batch_${Date.now()}_${index}`,
-            '2026-10-14',
-            `bench-med-${index}`,
-            `slot-${index}`,
-            'taken',
-            '10:00',
-            nowIso(),
-            nowIso(),
-            encrypted.enc_payload,
+            batchRow.id,
+            batchRow.date_key,
+            batchRow.medication_id,
+            batchRow.slot_id,
+            batchRow.status,
+            batchRow.logged_at,
+            batchRow.created_at,
+            batchRow.updated_at,
+            batchRow.enc_payload,
           ],
         );
       }
@@ -760,10 +980,32 @@ export class MedicationRepository {
 async function migrateStorage(platform: StoragePlatform): Promise<void> {
   await platform.driver.exec('PRAGMA journal_mode = WAL;');
   await platform.driver.exec('PRAGMA foreign_keys = ON;');
+  const versionRow = await platform.driver.get<{ user_version: number }>('PRAGMA user_version').catch(() => null);
+  const currentVersion = versionRow?.user_version ?? 0;
+  if (currentVersion >= CURRENT_DATABASE_SCHEMA_VERSION) {
+    // Already migrated (idempotent boot path); still ensure the version audit row exists.
+    const existing = await platform.driver
+      .get<SchemaVersionRecord>('SELECT * FROM schema_versions WHERE version = ?', [CURRENT_DATABASE_SCHEMA_VERSION])
+      .catch(() => null);
+    if (!existing) {
+      await platform.driver.run(
+        'INSERT INTO schema_versions (version, applied_at, description) VALUES (?, ?, ?)',
+        [CURRENT_DATABASE_SCHEMA_VERSION, nowIso(), 'Initial encrypted SQLite schema (COR-71)'],
+      );
+    }
+    return;
+  }
   await platform.driver.transaction(async () => {
     for (const statement of DDL_STATEMENTS) {
       await platform.driver.exec(statement);
     }
+    await platform.driver.run(
+      `CREATE TABLE IF NOT EXISTS ${VAULT_CANARY_TABLE} (
+        id TEXT PRIMARY KEY,
+        sealed TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );`,
+    );
     const existing = await platform.driver.get<SchemaVersionRecord>(
       'SELECT * FROM schema_versions WHERE version = ?',
       [CURRENT_DATABASE_SCHEMA_VERSION],
@@ -785,32 +1027,96 @@ export async function createStorageContext(platform: StoragePlatform): Promise<S
   return {
     repository,
     async validateVault(): Promise<boolean> {
+      // True only when the stored key proves itself against the stored canary.
+      // Fresh installs (no key, no rows) report true; key-loss reports false.
       try {
-        await repository.setPreference(CANARY_PREF_KEY, CANARY_PLAINTEXT);
-        const value = await repository.getPreference<string>(CANARY_PREF_KEY, '');
-        return value === CANARY_PLAINTEXT;
+        const raw = await platform.keystore.getItem(VAULT_KEY_ID);
+        if (!raw) {
+          return !(await vaultHasEncryptedRows(platform.driver));
+        }
+        const envelope = JSON.parse(raw) as VaultKeyEnvelope;
+        if (envelope.v !== 1 || typeof envelope.k !== 'string' || fromBase64(envelope.k).length !== 32) {
+          return false;
+        }
+        const key = fromBase64(envelope.k);
+        const sealed = await platform.driver.get<{ sealed: string }>(
+          `SELECT sealed FROM ${VAULT_CANARY_TABLE} WHERE id = ?`,
+          [VAULT_CANARY_ROW_ID],
+        );
+        if (!sealed) {
+          // Key exists but canary missing: only valid on a truly empty vault.
+          return !(await vaultHasEncryptedRows(platform.driver));
+        }
+        try {
+          return decodeUtf8(await platform.cipher.open(sealed.sealed, key)) === VAULT_AUTH_TAG;
+        } catch {
+          return false;
+        }
       } catch {
         return false;
       }
     },
     async deleteVault(): Promise<void> {
       await platform.keystore.deleteItem(VAULT_KEY_ID);
+      repository.forgetCachedKeyForTests();
       await platform.driver.transaction(async () => {
         await platform.driver.run('DELETE FROM dose_logs');
         await platform.driver.run('DELETE FROM time_slots');
         await platform.driver.run('DELETE FROM medications');
         await platform.driver.run('DELETE FROM user_preferences');
+        await platform.driver.run(`DELETE FROM ${VAULT_CANARY_TABLE} WHERE id = ?`, [VAULT_CANARY_ROW_ID]);
       });
     },
-    async migrateIfNeeded(seedTodayKey?: string): Promise<void> {
+    async migrateIfNeeded(options?: { seedTodayKey?: string; allowSeed?: boolean }): Promise<void> {
       await repository.ensureReady();
-      const medications = await repository.getAllMedications();
-      if (medications.length === 0) {
-        const { createInitialSeedData } = await import('../domain/medication-data');
-        const seed = createInitialSeedData(seedTodayKey || new Date().toISOString().slice(0, 10));
-        await repository.bulkSaveMedications(seed.medications);
-        await repository.bulkSaveDoseLogs(seed.logs);
-      }
+      // Seeding is explicit and dev-only: never auto-reseed a vault the user has emptied.
+      if (options?.allowSeed !== true) return;
+      const countRow = await platform.driver.get<{ count: number }>('SELECT COUNT(*) AS count FROM medications');
+      if ((countRow?.count ?? 0) > 0) return;
+      const seededFlag = await platform.driver
+        .get<UserPreferenceRow>('SELECT * FROM user_preferences WHERE pref_key = ?', ['__seeded_demo__'])
+        .catch(() => null);
+      if (seededFlag) return;
+      const { createInitialSeedData } = await import('../domain/medication-data');
+      const seed = createInitialSeedData(options?.seedTodayKey || new Date().toISOString().slice(0, 10));
+      await repository.bulkSaveMedications(seed.medications);
+      await repository.bulkSaveDoseLogs(seed.logs);
+      await repository.setPreference('__seeded_demo__', true);
     },
   };
+}
+
+/** Seeding entry point for dev/diagnostics only (never auto-run on boot). */
+export async function seedDemoVault(
+  repository: MedicationRepository,
+  seedTodayKey?: string,
+): Promise<void> {
+  const { createInitialSeedData, estimateDaysOfSupplyRemaining } = await import('../domain/medication-data');
+  const seed = createInitialSeedData(seedTodayKey || new Date().toISOString().slice(0, 10));
+  // Clamp demo inventory to currentUnits so showing history never drains stock,
+  // and strip drug names from storage IDs (they would otherwise sit in plaintext PKs).
+  const anonymized = seed.medications.map((med, index) => {
+    const supply = Math.max(1, estimateDaysOfSupplyRemaining(med));
+    const medId = `seed-med-${index + 1}`;
+    return {
+      ...med,
+      id: medId,
+      timeSlots: med.timeSlots.map((slot, slotIndex) => ({ ...slot, id: `seed-slot-${index + 1}-${slotIndex + 1}` })),
+      inventory: { ...med.inventory, currentUnits: Math.max(med.inventory.currentUnits, supply) },
+    };
+  });
+  const logRemap = new Map<string, string>();
+  seed.medications.forEach((oldMed, index) => {
+    oldMed.timeSlots.forEach((slot, slotIndex) => {
+      logRemap.set(`${oldMed.id}:${slot.id}`, `seed-med-${index + 1}:seed-slot-${index + 1}-${slotIndex + 1}`);
+    });
+  });
+  await repository.bulkSaveMedications(anonymized);
+  // Preserve each log's original loggedAt by writing rows directly (logDose would stamp "now").
+  for (const log of Object.values(seed.logs)) {
+    const mapped = logRemap.get(`${log.medicationId}:${log.slotId}`);
+    if (!mapped) continue;
+    const [medicationId, slotId] = mapped.split(':');
+    await repository.logDoseAt(log.dateKey, medicationId, slotId, log.status, log.loggedAt, log.note);
+  }
 }
