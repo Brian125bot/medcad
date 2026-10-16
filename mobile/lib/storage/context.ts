@@ -444,7 +444,19 @@ export class MedicationRepository {
     staleSlotIds?: string[],
   ): Promise<void> {
     const key = await this.getKey();
-    await this.platform.driver.transaction(async () => {
+    await this.platform.driver.transaction(() =>
+      this.writeMedicationAndSlots(key, medicationRow, timeSlotRows, staleSlotIds),
+    );
+  }
+
+  /** Writes one medication + its slots. Caller must already be inside a transaction. */
+  private async writeMedicationAndSlots(
+    key: Uint8Array,
+    medicationRow: MedicationRow,
+    timeSlotRows: TimeSlotRow[],
+    staleSlotIds?: string[],
+  ): Promise<void> {
+    {
       const encryptedMedication = await encryptMedicationRow(
         this.platform.cipher,
         key,
@@ -526,8 +538,7 @@ export class MedicationRepository {
           await this.platform.driver.run('DELETE FROM time_slots WHERE id = ?', [id]);
         }
       }
-
-    });
+    }
   }
 
   private async getMedicationRow(id: string): Promise<MedicationRow | null> {
@@ -668,6 +679,97 @@ export class MedicationRepository {
       };
     }
     return logs;
+  }
+
+  /**
+   * Dose logs with `startKey <= date_key <= endKey` (inclusive, `YYYY-MM-DD`),
+   * decrypted into domain entries. Uses the `idx_dose_logs_date` index.
+   */
+  public async getDoseLogsInRange(startKey: string, endKey: string): Promise<import('../domain/medication-data').DoseLogEntry[]> {
+    await this.ensureReady();
+    const key = await this.getKey();
+    const rows = await this.platform.driver.all<DoseLogRow>(
+      'SELECT * FROM dose_logs WHERE date_key >= ? AND date_key <= ? ORDER BY date_key ASC, logged_at ASC',
+      [startKey, endKey],
+    );
+    const logs: import('../domain/medication-data').DoseLogEntry[] = [];
+    for (const row of rows) {
+      const decrypted = await decryptDoseLogRow(this.platform.cipher, key, row);
+      logs.push({
+        id: row.id,
+        key: row.id,
+        dateKey: row.date_key,
+        medicationId: row.medication_id,
+        slotId: row.slot_id,
+        status: row.status,
+        loggedAt: row.logged_at,
+        note: decrypted.note || undefined,
+      });
+    }
+    return logs;
+  }
+
+  /**
+   * Writes medications and historical dose logs in ONE transaction (all or
+   * nothing). Like `logDoseAt`, logs never touch inventory; `taken` logs record
+   * the slot's dose as `unitsTaken`. `beforeCommit` runs inside the transaction
+   * after every row is written — a throw there rolls everything back (used by
+   * the COR-88 benchmark to prove atomicity).
+   */
+  public async importSnapshot(
+    medications: import('../domain/medication-data').Medication[],
+    logs: import('../domain/medication-data').DoseLogEntry[],
+    options: { beforeCommit?: () => void | Promise<void> } = {},
+  ): Promise<void> {
+    await this.ensureReady();
+    const { domainMedicationToRows } = await import('./mappers');
+    const { buildDoseKey } = await import('../domain/medication-data');
+    const doseUnitsBySlot = new Map<string, number>();
+    for (const med of medications) {
+      for (const slot of med.timeSlots) doseUnitsBySlot.set(`${med.id}:${slot.id}`, slot.doseUnits);
+    }
+    await this.platform.driver.runExclusive(async () => {
+      const key = await this.getKey();
+      await this.platform.driver.transaction(async () => {
+        for (const med of medications) {
+          const { medicationRow, timeSlotRows } = domainMedicationToRows(med);
+          await this.writeMedicationAndSlots(key, medicationRow as MedicationRow, timeSlotRows as TimeSlotRow[]);
+        }
+        const stamp = nowIso();
+        for (const log of logs) {
+          const encrypted = await encryptDoseLogRow(this.platform.cipher, key, {
+            id: buildDoseKey(log.dateKey, log.medicationId, log.slotId),
+            date_key: log.dateKey,
+            medication_id: log.medicationId,
+            slot_id: log.slotId,
+            status: log.status,
+            logged_at: log.loggedAt,
+            created_at: stamp,
+            updated_at: stamp,
+            enc_payload: '',
+            note: log.note ?? null,
+            unitsTaken: log.status === 'taken' ? (doseUnitsBySlot.get(`${log.medicationId}:${log.slotId}`) ?? 1) : null,
+          });
+          await this.platform.driver.run(
+            `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET status=excluded.status, logged_at=excluded.logged_at, updated_at=excluded.updated_at, enc_payload=excluded.enc_payload`,
+            [
+              encrypted.id,
+              encrypted.date_key,
+              encrypted.medication_id,
+              encrypted.slot_id,
+              encrypted.status,
+              encrypted.logged_at,
+              encrypted.created_at,
+              encrypted.updated_at,
+              encrypted.enc_payload,
+            ],
+          );
+        }
+        if (options.beforeCommit) await options.beforeCommit();
+      });
+    });
   }
 
   public async getDoseLogsByDate(dateKey: string) {

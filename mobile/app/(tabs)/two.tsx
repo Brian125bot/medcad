@@ -1,4 +1,4 @@
-import { Redirect } from "expo-router";
+import { Link, Redirect } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { Info } from "lucide-react-native";
 
@@ -14,6 +14,9 @@ export default function ThemeScreen() {
   return (
     <ScrollView className="flex-1 bg-cadence-background">
       <View className="px-5 pb-8 pt-6">
+        <Link href="/benchmark" className="mb-5 rounded-xl bg-white p-4 text-base font-semibold text-teal-700 shadow-sm">
+          Storage benchmark (COR-88) →
+        </Link>
         <Text className="text-lg font-semibold text-slate-900">Typography</Text>
         <View className="mt-3 rounded-2xl bg-white p-5 shadow-sm">
           <Text className="text-3xl font-bold text-slate-900">
