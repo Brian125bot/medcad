@@ -37,6 +37,12 @@ the issue id and PR number where there are any.
   gains `getDoseLogsInRange()` and `importSnapshot()`; `expoSqlDriver()` takes
   a database name. New dependencies `expo-device`, `expo-clipboard`. See
   [`device-benchmark.md`](mobile/docs/device-benchmark.md). *(COR-88)*
+- **[mobile]** COR-88 storage diagnostics on the benchmark screen: read-only
+  engine info, key present, canary OK, schema / `user_version` and row counts
+  for the app vault (no decrypted data, never the key), plus a key-loss →
+  `deleteVault()` recovery check that runs only on the isolated benchmark vault;
+  Copy Diagnostics button. The benchmark Markdown now follows the COR-88 report
+  template (sign-off left pending review). *(COR-88)*
 
 ## [1.0.0-alpha.1] - 2026-10-16
 

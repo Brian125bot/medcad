@@ -12,7 +12,8 @@ remain the only numbers there are, and they are **not** device evidence.
 | Harness (pure, unit-tested, in the 100 % coverage gate) | `lib/storage/device-benchmark.ts` |
 | Expo wiring: isolated DB file + keychain service | `createBenchmarkEnvironment()` in `lib/storage/index.ts` |
 | Dev-only screen | `app/benchmark.tsx` (route `/benchmark`), linked from the dev-only **Theme** tab |
-| Tests (node:sqlite, temp file) | `tests/device-benchmark.spec.ts` |
+| Diagnostics + key-loss recovery check (in the coverage gate) | `lib/storage/diagnostics.ts` |
+| Tests (node:sqlite, temp file) | `tests/device-benchmark.spec.ts`, `tests/storage-diagnostics.spec.ts`; `importSnapshot` / `getDoseLogsInRange` also in `tests/repository.test.ts` |
 
 ## What is measured
 
@@ -44,6 +45,38 @@ Integrity checks (any failure makes the overall result **FAIL**):
   after writing all its rows; the row counts must be unchanged.
 - **Data verified:** 10 / 500 rows written, 500 rows returned by the range
   query, the dose is `taken` and stock dropped by the slot's dose.
+
+## Report format
+
+**Copy Benchmark Results** produces Brian's COR-88 template: *1. Hardware &
+Environment*, *2. Benchmark Telemetry Results* (Cold / Avg Warm / target /
+status per operation), *3. Cryptographic & Data Integrity Verification* (each
+box is ticked only if that check passed in this run) and *4. Milestone
+Sign-Off*, which never claims M1 is complete: sign-off is left pending Brian's
+review. The JSON report is appended in a collapsed block.
+
+The second integrity box is worded as "sensitive fields unreadable without the
+key" because COR-71 encrypts fields, not the file. The first box's scan covers
+the raw rows of the benchmark database's data tables, not every file in the
+app sandbox.
+
+## Diagnostics and key-loss recovery
+
+On the same screen, **Run Storage Diagnostics**:
+
+1. Reads the **app's real vault**, read-only: `getStorageEngineInfo()`, whether a
+   vault key exists in SecureStore (yes/no, never the key), whether the canary
+   row exists and verifies (`validateVault()`), `schema_versions` /
+   `PRAGMA user_version`, and row counts. Nothing is decrypted or written.
+2. Runs the **key-loss recovery check on the isolated benchmark vault only**:
+   seeds synthetic rows, deletes the benchmark key (simulated Keychain loss),
+   confirms `validateVault()` is false, reads throw `VaultKeyMissingError` and no
+   new key is minted silently, then calls `deleteVault()` and confirms the data
+   and key are gone and a fresh key is provisioned and verified on the next
+   write. The benchmark vault is destroyed before and after. The real vault's
+   recovery path is never exercised, so there is no destructive option.
+
+**Copy Diagnostics** copies the text output.
 
 ## Encryption, reported truthfully
 

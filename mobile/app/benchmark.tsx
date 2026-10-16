@@ -17,7 +17,8 @@ import {
   type DeviceTelemetry,
   type GateStatus,
 } from "@/lib/storage/device-benchmark";
-import { createBenchmarkEnvironment } from "@/lib/storage";
+import { createBenchmarkEnvironment, getAppStorageDiagnostics, runBenchmarkVaultRecoveryCheck } from "@/lib/storage";
+import { diagnosticsToText, recoveryToText } from "@/lib/storage/diagnostics";
 
 /**
  * COR-88 hardware storage benchmark (development builds only).
@@ -50,6 +51,9 @@ export default function BenchmarkScreen() {
   const [report, setReport] = useState<DeviceBenchmarkReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [diagText, setDiagText] = useState<string | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [diagCopied, setDiagCopied] = useState(false);
 
   if (!__DEV__) return <Redirect href="/today" />;
 
@@ -75,6 +79,27 @@ export default function BenchmarkScreen() {
     }
   }
 
+  async function runDiagnostics() {
+    setDiagBusy(true);
+    setDiagCopied(false);
+    try {
+      // Real vault: read-only. Recovery check: isolated benchmark vault only.
+      const app = diagnosticsToText(await getAppStorageDiagnostics(), "app vault (read-only)");
+      const recovery = recoveryToText(await runBenchmarkVaultRecoveryCheck(toDateKey(new Date())));
+      setDiagText(`${app}\n\n${recovery}`);
+    } catch (cause) {
+      setDiagText(`Diagnostics failed (${cause instanceof Error ? cause.name : "Error"}).`);
+    } finally {
+      setDiagBusy(false);
+    }
+  }
+
+  async function copyDiagnostics() {
+    if (!diagText) return;
+    await Clipboard.setStringAsync(diagText);
+    setDiagCopied(true);
+  }
+
   async function copy() {
     if (!report) return;
     await Clipboard.setStringAsync(`${reportToMarkdown(report)}\n<details><summary>JSON</summary>\n\n\`\`\`json\n${reportToJson(report)}\n\`\`\`\n</details>\n`);
@@ -95,7 +120,7 @@ export default function BenchmarkScreen() {
 
         <Pressable
           accessibilityRole="button"
-          disabled={running}
+          disabled={running || diagBusy}
           onPress={run}
           className={`mt-5 items-center rounded-xl px-4 py-3 ${running ? "bg-slate-400" : "bg-teal-600"}`}
         >
@@ -143,6 +168,28 @@ export default function BenchmarkScreen() {
 
             <Pressable accessibilityRole="button" onPress={copy} className="mt-4 items-center rounded-xl border border-teal-600 px-4 py-3">
               <Text className="font-semibold text-teal-700">{copied ? "Copied" : "Copy Benchmark Results"}</Text>
+            </Pressable>
+          </View>
+        )}
+
+        <Text className="mb-2 mt-8 text-lg font-semibold text-slate-900">Storage diagnostics</Text>
+        <Text className="text-xs text-slate-500">
+          Reads engine info, key presence, canary, schema and row counts from the app vault without decrypting anything or showing the key.
+          The key-loss → deleteVault() recovery check runs only on the separate benchmark database and keychain entry.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          disabled={diagBusy || running}
+          onPress={runDiagnostics}
+          className={`mt-3 items-center rounded-xl px-4 py-3 ${diagBusy || running ? "bg-slate-400" : "bg-slate-700"}`}
+        >
+          <Text className="font-semibold text-white">{diagBusy ? "Running…" : "Run Storage Diagnostics"}</Text>
+        </Pressable>
+        {diagText && (
+          <View className="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+            <Text selectable className="font-mono text-xs text-slate-800">{diagText}</Text>
+            <Pressable accessibilityRole="button" onPress={copyDiagnostics} className="mt-4 items-center rounded-xl border border-slate-600 px-4 py-3">
+              <Text className="font-semibold text-slate-700">{diagCopied ? "Copied" : "Copy Diagnostics"}</Text>
             </Pressable>
           </View>
         )}
