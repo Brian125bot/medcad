@@ -1,5 +1,14 @@
 # CadenceRx — Schema Migration Guide (COR-71)
 
+> **Scope notice — this describes the web prototype, not the mobile app.**
+>
+> The runner below (`lib/storage/migrations.ts`) belongs to the **Next.js web
+> prototype** at the repo root. The mobile app has no `migrations.ts`: its
+> schema versioning is a single step inside `migrateStorage()` in
+> `mobile/lib/storage/context.ts`. For how that works and how to change the
+> mobile schema, read
+> [`mobile/docs/storage.md`](../mobile/docs/storage.md#schema-versions-and-migrations).
+
 ## Overview
 
 CadenceRx features an idempotent schema migration runner implemented in `lib/storage/migrations.ts`. Migrations execute deterministically upon app boot prior to view rendering or data retrieval, ensuring zero race conditions or unmigrated schema reads.
