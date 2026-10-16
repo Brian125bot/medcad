@@ -42,7 +42,7 @@ Because `expo-sqlite` does not bundle SQLCipher whole-file encryption in Expo Go
 
 | Table | Structural Columns (Plaintext) | `enc_payload` (AES-256-GCM Sealed JSON) |
 |---|---|---|
-| `medications` | `id, frequency, start_date, end_date, days_of_week, interval_days, active, inventory_current, inventory_capacity, inventory_low_threshold, inventory_last_refilled, inventory_next_fill_date, inventory_calendar_event_id, created_at, updated_at` | `{ name, generic_name, strength, form, purpose, instructions, prescriber, inventory_pharmacy_note }` |
+| `medications` | `id, frequency, start_date, end_date, days_of_week, interval_days, active, inventory_current, inventory_capacity, inventory_low_threshold, inventory_last_refilled, inventory_next_fill_date, inventory_calendar_event_id, created_at, updated_at` | `{ name, generic_name, strength, form, purpose, instructions, prescriber, inventory_pharmacy_note, appearance }` |
 | `time_slots` | `id, medication_id, time, dose_units, reminder_enabled, lead_minutes, created_at, updated_at` | `{ label }` |
 | `dose_logs` | `id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at` | `{ note }` |
 | `user_preferences` | `id, pref_key, updated_at` | `{ value }` |
@@ -67,6 +67,70 @@ Because `expo-sqlite` does not bundle SQLCipher whole-file encryption in Expo Go
 5. **Demo Seed Hygiene**: `seedDemoVault()` (used only when explicitly requested via `resetSampleData()` or `migrateIfNeeded({ allowSeed: true })`) anonymizes medication and slot primary keys (`seed-med-N`, `seed-slot-N-M`) so drug names never appear in plaintext IDs, and writes historical dose logs via `logDoseAt()` so original `loggedAt` timestamps and medication inventory counts are preserved.
 
 ---
+
+## Schema Versions and Migrations
+
+- **Current version:** `CURRENT_DATABASE_SCHEMA_VERSION = 1` in
+  `lib/storage/schema.ts`. A fresh database ends with `PRAGMA user_version = 1`
+  and one `schema_versions` row (`version 1`, *"Initial encrypted SQLite schema
+  (COR-71)"*).
+- **Runner:** `migrateStorage()` in `lib/storage/context.ts`, invoked by
+  `ensureReady()` on every boot (there is no separate `migrations.ts` in
+  `mobile/`; the repo-root `docs/migrations.md` describes the **web**
+  prototype's runner, not this one):
+  1. set `journal_mode = WAL` and `foreign_keys = ON`;
+  2. read `PRAGMA user_version`; if it is already `>=` the current version,
+     make sure the audit row for that version exists and return;
+  3. otherwise, in one transaction, run every statement in `DDL_STATEMENTS`
+     (all `CREATE … IF NOT EXISTS`), create `__vault_canary__`, and insert the
+     audit row; then set `PRAGMA user_version`.
+  The version pragma is set *after* the transaction commits, so a crash between
+  the two leaves version 0 with tables present — safe, because the whole step
+  is idempotent.
+- **It is a one-step runner, not a framework.** There are no per-version steps,
+  and the audit-row description is hard-coded to the v1 text (it would be
+  written for *any* future version). Introduce ordered `if (currentVersion < N)`
+  steps before bumping the version.
+
+### Adding a change
+
+1. **PHI-only, additive, optional field?** Put it in the encrypted payload
+   (`MedicationPhi`, the `phi` object in `encryptMedicationRow`, and the mappers).
+   Old payloads simply don't have the key, so **no schema migration is
+   needed** — this is how `Medication.appearance` shipped. Treat the value as
+   untrusted on read.
+2. **Needs a column (queried, indexed, or a counter)?** Bump
+   `CURRENT_DATABASE_SCHEMA_VERSION`, add an ordered migration step that is
+   idempotent and updates `user_version` with the audit row, prefer
+   `ALTER TABLE … ADD COLUMN`, and keep the new column nullable/defaulted so
+   existing rows stay valid.
+3. **Test it:** build a v1 database with the fixtures in `tests/fixtures.ts`,
+   open it with the new code, and assert data is intact, the version advanced,
+   and a second open changes nothing (`tests/migrations.test.ts` is the closest
+   existing example; it covers fresh DDL and idempotent re-open, not yet an
+   upgrade from an older version).
+4. **Don't mint or rotate the vault key inside a migration** — see
+   *No Silent Rotation on Key Loss* above.
+
+## Behaviours Worth Knowing
+
+Observed by running the real repository over `node:sqlite` (the same code
+path the device uses; **not yet confirmed on hardware**, see COR-88). Each is
+a current behaviour, not necessarily a desired one — open items are in the
+[roadmap](roadmap.md#known-gaps-and-sharp-edges).
+
+| Behaviour | Detail |
+| --- | --- |
+| **Fractional units are stored as `REAL`.** | `dose_units`, `inventory_current` and `inventory_low_threshold` are *declared* `INTEGER`, but SQLite type affinity keeps non-integer values as `REAL` (a `29.5` round-trips and `typeof()` reports `real`). Don't trust the declared type when reading the schema by eye or writing tooling. |
+| **Stock only moves when `taken` flips.** | Logging `taken` twice deducts once (10 → 9 → 9); flipping `taken` → `skipped` gives the units back (→ 10). A double tap is safe. |
+| **Taking is clamped, undoing is not.** | `logDose` sets stock to `max(0, stock − doseUnits)` when a dose becomes `taken`; `undoDose` (and flipping `taken` → another status) adds back the full `doseUnits`. With 0.5 on hand and a 1-unit dose: take → 0, undo → **1**. Stock can drift upward after a clamped take. |
+| **Undo restores the slot's *current* dose, not what was deducted.** | Nothing records the amount a `taken` log removed. Take a 1-unit dose (10 → 9), edit the slot to 2 units, undo → **11**. Remove the slot first and undo restores **1** unit regardless of the original dose (a 3-unit take: 10 → 7, undo after removing the slot → **8**). Inventory drifts whenever a dose is edited or removed between take and undo. |
+| **Dose logs outlive their slot and their medication.** | `saveMedication` deletes slot rows that disappeared from the medication; `deleteMedication` deletes the slots and the medication. Neither touches `dose_logs` (there is no foreign key), so logs keyed `${dateKey}_${medId}_${slotId}` can point at slots/medications that no longer exist: 2 logs stayed 2 after removing a slot and again after deleting the medication. Any reader must tolerate that (COR-93). |
+| **Logging against an unknown slot assumes 1 unit.** | `logDose` falls back to `doseUnits = 1` when the slot id isn't found, and still decrements stock (10 → 9) — provided the *medication* exists. |
+| **Logging against an unknown medication succeeds.** | No error: the log row is written (there is no foreign key) and no stock changes. Callers must pass real ids; the repository does not check. |
+| **`logDoseAt` never touches inventory.** | It is the seeding/admin variant that preserves the caller's `loggedAt`; historical demo logs can't drain stock (10 → 10). Not for UI dose logging. |
+| **`deleteVault()` wipes everything.** | A method on the **`StorageContext`** (not the repository). Removes the keystore entry, the four data tables (`medications`, `time_slots`, `dose_logs`, `user_preferences`) and the canary, and clears the cached key — it leaves `schema_versions` alone. Afterwards `validateVault()` is `true` and the next write provisions a brand-new key. It is the explicit recovery path after `VaultKeyMissingError`. It clears the cached key through a method named `forgetCachedKeyForTests()`, which looks test-only but is production code — don't delete it as dead code. |
+| **Seeding is opt-in.** | `seedDemoVault` runs only via `migrateIfNeeded({ allowSeed: true })` or `resetSampleData()`. No screen calls either today. |
 
 ## Latency Benchmark (local developer machine — NOT CI, NOT device)
 

@@ -1,5 +1,13 @@
 # COR-71 Implementation Plan — Local Encrypted SQLite / Storage Layer (CadenceRx Mobile)
 
+> **Historical document — the as-built layout differs from this plan.**
+> The plan proposes separate `codec.ts`, `keyring.ts`, `database.ts`,
+> `repository.ts`, `migrations.ts` and `benchmark.ts` modules. What shipped
+> folds all of that into **`lib/storage/context.ts`** (alongside `mappers.ts`,
+> `schema.ts`, `ports.ts`, the three `expo-*` adapters and `index.ts`).
+> For how the storage layer actually works today, read
+> [`storage.md`](storage.md) and [`architecture.md`](architecture.md).
+
 Linear: https://linear.app/coretek/issue/COR-71/implement-local-encrypted-sqlite-storage-layer
 Priority 1 · Milestone M1 · Blocks COR-74, COR-76, COR-78, COR-80, COR-84, COR-86
 

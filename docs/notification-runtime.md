@@ -1,5 +1,13 @@
 # CadenceRx Notification Engine: Supported Runtime & Architecture
 
+> **Scope notice — this describes the web prototype, not the mobile app.**
+>
+> This page covers the **Next.js web** notification engine (`lib/notifications.ts`,
+> which the web code and tests also refer to as "COR-76"). The *mobile*
+> notification engine is Linear **COR-76** and is **not built yet**; see
+> [`mobile/docs/roadmap.md`](../mobile/docs/roadmap.md) for its status and
+> requirements.
+
 ## Runtime Environment
 CadenceRx runs as a Next.js (App Router) web application. This document outlines the notification delivery model, security posture, and runtime capabilities.
 
