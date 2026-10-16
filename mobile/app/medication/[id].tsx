@@ -44,7 +44,7 @@ export default function EditMedicationScreen() {
           onCancel={() => router.back()}
           onSave={async (med) => {
             const { repository } = await getStorageContext();
-            await repository.saveMedication(med);
+            await repository.saveMedication(med, { inventoryBaseline: loaded.med.inventory.currentUnits });
             router.back();
           }}
         />

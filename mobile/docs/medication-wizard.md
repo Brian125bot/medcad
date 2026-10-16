@@ -120,9 +120,11 @@ without one the default look is used.
 These are current behaviours, not endorsements — several are tracked in the
 [roadmap](roadmap.md#known-gaps-and-sharp-edges).
 
-- **Edit overwrites stock with the form's snapshot.** `currentUnits` is taken
-  from the form, so a dose logged between opening the editor and saving would
-  be overwritten. (No screen logs doses yet, so this is latent.)
+- **Edit merges stock instead of overwriting it (COR-95).** The edit screen
+  saves with `saveMedication(med, { inventoryBaseline })`, where the baseline is
+  the `currentUnits` it loaded. Under the write gate the repository re-reads the
+  stored stock and applies only `form currentUnits - baseline`, so a dose logged
+  on Today while the editor is open is kept.
 - **Removing a dose time** deletes that slot row immediately on save, with no
   confirmation, and leaves its past `dose_logs` behind (COR-93).
 - **`nextFillDate` is not recalculated** when schedule or inventory change
