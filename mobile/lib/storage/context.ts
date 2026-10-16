@@ -566,20 +566,43 @@ export class MedicationRepository {
     return (await import('./mappers')).rowsToDomainMedication(decrypted as never, slots as never);
   }
 
-  public async saveMedication(med: import('../domain/medication-data').Medication) {
+  /**
+   * Saves a medication. Editors that started from a snapshot pass
+   * `inventoryBaseline` (the `currentUnits` they loaded): the stored stock is
+   * then re-read under the write gate and only the user's own change
+   * (`currentUnits - inventoryBaseline`) is applied on top, so doses logged
+   * while the editor was open are not overwritten (COR-95).
+   */
+  public async saveMedication(
+    med: import('../domain/medication-data').Medication,
+    options: { inventoryBaseline?: number } = {},
+  ) {
     await this.ensureReady();
     const { domainMedicationToRows } = await import('./mappers');
     const { medicationRow, timeSlotRows } = domainMedicationToRows(med);
-    const existingSlots = await this.getTimeSlotRows(med.id);
-    const nextIds = new Set(timeSlotRows.map((slot) => slot.id));
-    const staleSlotIds = existingSlots.filter((slot) => !nextIds.has(slot.id)).map((slot) => slot.id);
-    const startedAt = performance.now();
-    await this.putMedicationAndSlots(
-      medicationRow as MedicationRow,
-      timeSlotRows as TimeSlotRow[],
-      staleSlotIds,
-    );
-    this.lastWriteLatencyMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    const write = async () => {
+      const baseline = options.inventoryBaseline;
+      if (baseline !== undefined) {
+        const latest = await this.getMedicationRow(med.id);
+        if (latest) {
+          const userDelta = med.inventory.currentUnits - baseline;
+          medicationRow.inventory_current = Math.max(0, latest.inventory_current + userDelta);
+          med = { ...med, inventory: { ...med.inventory, currentUnits: medicationRow.inventory_current } };
+        }
+      }
+      const existingSlots = await this.getTimeSlotRows(med.id);
+      const nextIds = new Set(timeSlotRows.map((slot) => slot.id));
+      const staleSlotIds = existingSlots.filter((slot) => !nextIds.has(slot.id)).map((slot) => slot.id);
+      const startedAt = performance.now();
+      await this.putMedicationAndSlots(
+        medicationRow as MedicationRow,
+        timeSlotRows as TimeSlotRow[],
+        staleSlotIds,
+      );
+      this.lastWriteLatencyMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    };
+    if (options.inventoryBaseline !== undefined) await this.platform.driver.runExclusive(write);
+    else await write();
     return med;
   }
 

@@ -115,6 +115,33 @@ async function main() {
   const canary = await context.validateVault();
   assert.strictEqual(canary, true);
 
+  // COR-95: a dose logged while the editor is open survives the editor's save.
+  await repository.saveMedication({ ...medication, id: 'med-edit' });
+  const editorSnapshot = (await repository.getMedicationById('med-edit'))!;
+  assert.strictEqual(editorSnapshot.inventory.currentUnits, 10);
+  await repository.logDose('2026-10-15', 'med-edit', 'slot-a', 'taken'); // Today: 10 -> 8
+  const saved = await repository.saveMedication(
+    { ...editorSnapshot, name: 'Renamed in editor' },
+    { inventoryBaseline: editorSnapshot.inventory.currentUnits },
+  );
+  assert.strictEqual(saved.inventory.currentUnits, 8);
+  let reloaded = (await repository.getMedicationById('med-edit'))!;
+  assert.strictEqual(reloaded.name, 'Renamed in editor');
+  assert.strictEqual(reloaded.inventory.currentUnits, 8, 'dose logged during edit must survive the save');
+  // A deliberate stock edit is applied as a delta on top of the latest stock.
+  const snapshot2 = reloaded;
+  await repository.logDose('2026-10-15', 'med-edit', 'slot-b', 'taken'); // 8 -> 7
+  await repository.saveMedication(
+    { ...snapshot2, inventory: { ...snapshot2.inventory, currentUnits: 20 } }, // user +12
+    { inventoryBaseline: snapshot2.inventory.currentUnits },
+  );
+  reloaded = (await repository.getMedicationById('med-edit'))!;
+  assert.strictEqual(reloaded.inventory.currentUnits, 19);
+  // Without a baseline the save is a plain overwrite (refill/toggle paths re-read first).
+  await repository.saveMedication({ ...reloaded, inventory: { ...reloaded.inventory, currentUnits: 3 } });
+  assert.strictEqual((await repository.getMedicationById('med-edit'))!.inventory.currentUnits, 3);
+  await repository.deleteMedication('med-edit');
+
   await repository.deleteMedication('med-1');
   assert.strictEqual(await repository.getMedicationById('med-1'), null);
 
