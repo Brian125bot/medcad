@@ -3,15 +3,16 @@
 All notable changes to this repository. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**No version has ever been tagged**, and `mobile/` has not shipped, so there are
-no release numbers or compare links yet. Until the first release:
+The first version, **1.0.0-alpha.1**, was tagged on 2026-10-16. It is an
+alpha pre-release: `mobile/` has **not shipped** to any store and has **not been
+verified on a device**.
 
-- `[Unreleased]` lists work on `main` that has **not been released yet** (there
-  is no release so far, so this is everything since the start).
-- **Pre-release history** below records what has landed on `main`, grouped by
-  Linear issue (`COR-nn`), newest first. Dates are commit dates.
-- When a version is cut, move the relevant entries under a `## [x.y.z] - date`
-  heading and add the compare links.
+- `[Unreleased]` lists work on `main` since the last tag.
+- Each version's section lists what it contains. The **Pre-release history**
+  at the end records, by Linear issue (`COR-nn`), what landed before the first
+  tag; all of it is part of 1.0.0-alpha.1. Dates are commit dates.
+- When a version is cut, move the `[Unreleased]` entries under a
+  `## [x.y.z] - date` heading and add its compare link at the bottom.
 
 Scope tags: **[mobile]** = `mobile/` (the active app); **[web]** = the Next.js
 prototype at the repo root.
@@ -24,11 +25,10 @@ the issue id and PR number where there are any.
 
 ## [Unreleased]
 
-### Fixed
-- **[mobile]** Restored `assets/fonts/SpaceMono-Regular.ttf` (Space Mono, OFL)
-  so `useFonts` in `app/_layout.tsx` resolves and native / web exports bundle
-  again; Metro registers `.wasm` assets for `expo-sqlite` on web export.
-  *(COR-90)*
+## [1.0.0-alpha.1] - 2026-10-16
+
+First tagged version: an alpha pre-release of the CadenceRx mobile app. Not
+shipped and not verified on a device.
 
 ### Added
 - **[mobile]** **Today screen** (COR-74): 7-day date strip with retroactive
@@ -102,6 +102,18 @@ the issue id and PR number where there are any.
   done from the header's "+ Add" on every tab. *(COR-73 follow-up)*
 
 ### Fixed
+- **[mobile]** Editing a medication no longer overwrites stock changed by dose
+  logging while the editor was open: the edit screen saves with
+  `inventoryBaseline` and the repository applies only the user's stock change
+  on top of the latest stored value. *(COR-95, `9e2d6db`)*
+- **[mobile]** Undoing a taken dose (or changing it to skipped / pending)
+  refunds the units that were actually deducted, stored as `unitsTaken` in the
+  encrypted dose-log payload, instead of the slot's current dose. Older logs
+  fall back to the slot's current dose, or 1 unit. *(COR-96, `b5aefbd`)*
+- **[mobile]** Restored `assets/fonts/SpaceMono-Regular.ttf` (Space Mono, OFL)
+  so `useFonts` in `app/_layout.tsx` resolves and native / web exports bundle
+  again; Metro registers `.wasm` assets for `expo-sqlite` on web export.
+  *(COR-90, PR #14)*
 - **[mobile]** `npx tsc --noEmit` failed once Expo had generated typed routes
   (`.expo/types/router.d.ts`): `ExternalLink`'s `href` is now typed as Expo
   Router's `ExternalPathString` instead of `string`. *(COR-73 follow-up)*
@@ -124,13 +136,16 @@ the issue id and PR number where there are any.
 - Added scope notices to `docs/migrations.md` and `docs/notification-runtime.md`
   (they describe the web prototype; `docs/storage.md` already had one).
 - Documented, by running the repository code, behaviours that are easy to trip
-  over — notably that **undo restores the slot's current dose** and can drift
-  stock, and that dose logs outlive their slot and medication. See
+  over — notably that dose logs outlive their slot and medication (the undo
+  drift documented at the time is fixed by COR-96). See
   [`roadmap.md`](mobile/docs/roadmap.md#known-gaps-and-sharp-edges).
 
 ---
 
 ## Pre-release history
+
+Everything below landed before the first tag and is included in
+[1.0.0-alpha.1].
 
 ### COR-75 — Add / edit medication wizard · 2026-10-16 · PR #7 (`d3a3f6d`)
 - **[mobile] Added** a four-step wizard (basic info → pill look → schedule →
@@ -221,3 +236,6 @@ the issue id and PR number where there are any.
   (2026-10-14).
 - The web prototype is being replaced by the mobile app; it is no longer
   extended.
+
+[Unreleased]: https://github.com/Brian125bot/medcad/compare/v1.0.0-alpha.1...HEAD
+[1.0.0-alpha.1]: https://github.com/Brian125bot/medcad/releases/tag/v1.0.0-alpha.1
