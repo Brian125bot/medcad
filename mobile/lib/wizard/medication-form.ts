@@ -234,21 +234,20 @@ function validateSchedule(state: MedicationFormState, errors: FormErrors): void 
 }
 
 function validateInventory(state: MedicationFormState, errors: FormErrors): void {
-  const current = parseInteger(state.currentUnits);
+  // On-hand and threshold may be fractional (logDose subtracts fractional
+  // doseUnits) and may exceed the package size (refills add on top), so both
+  // are non-negative decimals; exceeding capacity is only a warning.
+  const current = parseDecimal(state.currentUnits);
   const capacity = parseInteger(state.capacityUnits);
-  const low = parseInteger(state.lowThresholdUnits);
+  const low = parseDecimal(state.lowThresholdUnits);
   if (!(current <= LIMITS.unitsMax)) {
-    errors.currentUnits = 'Enter how many units are on hand (whole number, 0 or more).';
+    errors.currentUnits = 'Enter how many units are on hand (0 or more).';
   }
   if (!(capacity >= 1 && capacity <= LIMITS.unitsMax)) {
     errors.capacityUnits = 'Package size must be a whole number of at least 1.';
-  } else if (current > capacity) {
-    errors.currentUnits = 'On-hand count cannot exceed the package size.';
   }
   if (!(low <= LIMITS.unitsMax)) {
-    errors.lowThresholdUnits = 'Low-stock alert must be a whole number, 0 or more.';
-  } else if (capacity >= 1 && low > capacity) {
-    errors.lowThresholdUnits = 'Low-stock alert cannot exceed the package size.';
+    errors.lowThresholdUnits = 'Low-stock alert must be 0 or more.';
   }
   if (!isValidDateKey(state.lastRefilledAt)) {
     errors.lastRefilledAt = 'Enter a real refill date (YYYY-MM-DD).';
@@ -256,6 +255,22 @@ function validateInventory(state: MedicationFormState, errors: FormErrors): void
   if (state.pharmacyNote.trim().length > LIMITS.noteMax) {
     errors.pharmacyNote = `Pharmacy notes must be ${LIMITS.noteMax} characters or fewer.`;
   }
+}
+
+/**
+ * Non-blocking inventory warnings (never prevent saving). Field path ->
+ * message, same keys as {@link FormErrors}.
+ */
+export function inventoryWarnings(state: MedicationFormState): FormErrors {
+  const warnings: FormErrors = {};
+  const current = parseDecimal(state.currentUnits);
+  const capacity = parseInteger(state.capacityUnits);
+  const low = parseDecimal(state.lowThresholdUnits);
+  if (capacity >= 1) {
+    if (current > capacity) warnings.currentUnits = 'More than one package on hand — that is OK after a refill.';
+    if (low > capacity) warnings.lowThresholdUnits = 'Alert level is above the package size.';
+  }
+  return warnings;
 }
 
 const STEP_VALIDATORS: Record<WizardStep, (s: MedicationFormState, e: FormErrors) => void> = {
@@ -340,16 +355,16 @@ export function formToMedication(state: MedicationFormState, options: FormToMedi
     startDate: state.startDate,
     timeSlots,
     inventory: {
-      currentUnits: parseInteger(state.currentUnits),
+      currentUnits: parseDecimal(state.currentUnits),
       capacityUnits: parseInteger(state.capacityUnits),
-      lowThresholdUnits: parseInteger(state.lowThresholdUnits),
+      lowThresholdUnits: parseDecimal(state.lowThresholdUnits),
       lastRefilledAt: state.lastRefilledAt,
     },
     active: existing?.active ?? true,
   };
   if (genericName) med.genericName = genericName;
   if (existing?.prescriber) med.prescriber = existing.prescriber;
-  if (state.frequency === 'specific_days') med.daysOfWeek = [...new Set(state.daysOfWeek)].sort();
+  if (state.frequency === 'specific_days') med.daysOfWeek = [...new Set(state.daysOfWeek)].sort((a, b) => a - b);
   if (state.frequency === 'interval') med.intervalDays = parseInteger(state.intervalDays);
   if (pharmacyNote) med.inventory.pharmacyNote = pharmacyNote;
   if (existing?.inventory.nextFillDate) med.inventory.nextFillDate = existing.inventory.nextFillDate;

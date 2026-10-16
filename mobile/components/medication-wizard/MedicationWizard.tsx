@@ -17,6 +17,7 @@ import type { Medication, ScheduleFrequency } from "@/lib/domain/medication-data
 import {
   firstInvalidStep,
   formToMedication,
+  inventoryWarnings,
   LIMITS,
   MEDICATION_FORMS,
   PILL_COLORS,
@@ -64,6 +65,7 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
   const [saveError, setSaveError] = useState<string | null>(null);
   const step = WIZARD_STEPS[stepIndex];
   const isLast = stepIndex === WIZARD_STEPS.length - 1;
+  const warnings = inventoryWarnings(state);
 
   const update = (patch: Partial<MedicationFormState>) => {
     const next = { ...state, ...patch };
@@ -237,14 +239,14 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
 
         {step === "inventory" && (
           <>
-            <Field label="Units on hand" error={errors.currentUnits}>
-              <Input value={state.currentUnits} onChangeText={(currentUnits) => update({ currentUnits })} keyboardType="number-pad" error={errors.currentUnits} />
+            <Field label="Units on hand" error={errors.currentUnits} warning={warnings.currentUnits}>
+              <Input value={state.currentUnits} onChangeText={(currentUnits) => update({ currentUnits })} keyboardType="decimal-pad" error={errors.currentUnits} />
             </Field>
             <Field label="Package size (units)" error={errors.capacityUnits}>
               <Input value={state.capacityUnits} onChangeText={(capacityUnits) => update({ capacityUnits })} keyboardType="number-pad" error={errors.capacityUnits} />
             </Field>
-            <Field label="Low-stock alert at (units)" error={errors.lowThresholdUnits}>
-              <Input value={state.lowThresholdUnits} onChangeText={(lowThresholdUnits) => update({ lowThresholdUnits })} keyboardType="number-pad" error={errors.lowThresholdUnits} />
+            <Field label="Low-stock alert at (units)" error={errors.lowThresholdUnits} warning={warnings.lowThresholdUnits}>
+              <Input value={state.lowThresholdUnits} onChangeText={(lowThresholdUnits) => update({ lowThresholdUnits })} keyboardType="decimal-pad" error={errors.lowThresholdUnits} />
             </Field>
             <NativePickerField mode="date" label="Last refilled" value={state.lastRefilledAt} onChange={(lastRefilledAt) => update({ lastRefilledAt })} error={errors.lastRefilledAt} />
             <Field label="Pharmacy notes (optional)" error={errors.pharmacyNote}>
@@ -269,12 +271,16 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
   );
 }
 
-function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+function Field({ label, error, warning, children }: { label: string; error?: string; warning?: string; children: ReactNode }) {
   return (
     <View className="mb-3">
       <Text className="mb-1 text-sm font-medium text-slate-700">{label}</Text>
       {children}
-      {error ? <Text className="mt-1 text-sm text-cadence-alert">{error}</Text> : null}
+      {error ? (
+        <Text className="mt-1 text-sm text-cadence-alert">{error}</Text>
+      ) : warning ? (
+        <Text className="mt-1 text-sm text-slate-500">{warning}</Text>
+      ) : null}
     </View>
   );
 }

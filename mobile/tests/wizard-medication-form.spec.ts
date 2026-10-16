@@ -5,6 +5,7 @@ import {
   dateToTime,
   firstInvalidStep,
   formToMedication,
+  inventoryWarnings,
   isValidTime,
   MedicationFormInvalidError,
   medicationToForm,
@@ -158,12 +159,36 @@ describe('validation', () => {
     }));
     expect(Object.keys(e).sort()).toEqual(['capacityUnits', 'currentUnits', 'lastRefilledAt', 'lowThresholdUnits', 'pharmacyNote']);
     const e2 = validateStep('inventory', validForm({ currentUnits: '40', capacityUnits: '30', lowThresholdUnits: '31' }));
-    expect(e2.currentUnits).toMatch(/exceed/);
-    expect(e2.lowThresholdUnits).toMatch(/exceed/);
-    const e3 = validateStep('inventory', validForm({ capacityUnits: '', lowThresholdUnits: '50', currentUnits: '3' }));
-    expect(e3.lowThresholdUnits).toBeUndefined();
-    expect(e3.currentUnits).toBeUndefined();
+    expect(e2).toEqual({});
+    expect(validateStep('inventory', validForm({ currentUnits: '1.5.0', lowThresholdUnits: '-1' }))).toMatchObject({
+      currentUnits: expect.any(String), lowThresholdUnits: expect.any(String),
+    });
     expect(firstInvalidStep(validForm({ capacityUnits: '0' }))).toBe('inventory');
+  });
+});
+
+describe('inventory warnings (non-blocking)', () => {
+  it('warns above package size, silent otherwise', () => {
+    expect(inventoryWarnings(validForm({ currentUnits: '55', capacityUnits: '30', lowThresholdUnits: '31' }))).toEqual({
+      currentUnits: expect.stringMatching(/refill/), lowThresholdUnits: expect.any(String),
+    });
+    expect(inventoryWarnings(validForm({ currentUnits: '55', capacityUnits: '0' }))).toEqual({});
+    expect(inventoryWarnings(validForm())).toEqual({});
+  });
+
+  it('saves a fractional on-hand count after logDose (29.5 / 30)', () => {
+    const form = medicationToForm({ ...existing, inventory: { ...existing.inventory, currentUnits: 29.5, lowThresholdUnits: 2.5 } }, TODAY);
+    expect(form.currentUnits).toBe('29.5');
+    const med = formToMedication(form, { newId: ids(), existing });
+    expect(med.inventory.currentUnits).toBe(29.5);
+    expect(med.inventory.lowThresholdUnits).toBe(2.5);
+  });
+
+  it('saves an over-capacity count after refillMedication (55 on a 30 pack)', () => {
+    const form = medicationToForm({ ...existing, inventory: { ...existing.inventory, currentUnits: 55, capacityUnits: 30 } }, TODAY);
+    expect(validateForm(form)).toEqual({});
+    expect(inventoryWarnings(form).currentUnits).toBeDefined();
+    expect(formToMedication(form, { newId: ids(), existing }).inventory.currentUnits).toBe(55);
   });
 });
 
@@ -198,6 +223,7 @@ describe('formToMedication', () => {
 
   it('maps specific days (deduped, sorted) and interval', () => {
     expect(formToMedication(validForm({ frequency: 'specific_days', daysOfWeek: [5, 1, 5] }), { newId: ids() }).daysOfWeek).toEqual([1, 5]);
+    expect(formToMedication(validForm({ frequency: 'specific_days', daysOfWeek: [6, 0, 3] }), { newId: ids() }).daysOfWeek).toEqual([0, 3, 6]);
     expect(formToMedication(validForm({ frequency: 'interval', intervalDays: '3' }), { newId: ids() }).intervalDays).toBe(3);
   });
 
