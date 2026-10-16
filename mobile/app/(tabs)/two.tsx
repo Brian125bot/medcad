@@ -1,11 +1,16 @@
+import { Redirect } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { Info } from "lucide-react-native";
 
 /**
  * Theme reference screen (COR-70 scaffold).
  * Shows the NativeWind typography scale and confirms safe-area wiring.
+ * Hidden from the tab bar (COR-73) and reachable at `/two` in development
+ * builds only; production builds redirect to Today.
  */
 export default function ThemeScreen() {
+  if (!__DEV__) return <Redirect href="/today" />;
+
   return (
     <ScrollView className="flex-1 bg-cadence-background">
       <View className="px-5 pb-8 pt-6">

@@ -15,7 +15,7 @@ one area each (see the [index](README.md)).
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │  UI            app/ (Expo Router screens)  ·  components/            │
-│                Tabs: Home, Medications, Theme · Modals: add / edit   │
+│                Tabs: Today, Regimen, Insights, Cabinet · Modals      │
 └──────────────┬───────────────────────────────┬───────────────────────┘
                │ form state                    │ repository calls
                ▼                               ▼
@@ -48,7 +48,10 @@ primitives, with identical wire formats). Only three thin adapter files touch
 | Path | Role | Pure (Node-testable)? | Tests |
 | --- | --- | --- | --- |
 | `app/_layout.tsx` | Root stack, fonts, splash, `SafeAreaProvider` | no | — |
-| `app/(tabs)/` | `index` (Home — design-token showcase left from the COR-70 scaffold), `medications` (list + "Add medication"), `two` (Theme — typography reference, also scaffold) | no | — |
+| `app/index.tsx` | Redirects `/` to `/today` | no | — |
+| `app/(tabs)/` | Four tabs (COR-73): `today` (placeholder, COR-74), `regimen` (medication list + "Add medication"), `insights` (placeholder, COR-80), `cabinet` (placeholder, COR-78). `two` (Theme — typography reference from the COR-70 scaffold) is a hidden tab (`href: null`), reachable at `/two` in dev builds only | no | — |
+| `components/tab-header/` | Shared tab header: title + locale date, "Local only" sync pill, "+ Add" action; set once in the tabs layout's `screenOptions` | no | — |
+| `lib/navigation/` | Tab set (`PRIMARY_TABS`), `toTabBadge`, header date formatting, `SYNC_STATUS_LABEL` | **yes** | `navigation.spec.ts` |
 | `app/medication/new.tsx`, `[id].tsx` | Add / edit modal screens; load + save via the repository | no | — |
 | `components/medication-wizard/` | `MedicationWizard`, `NativePickerField`, `PillPreview` | no | — |
 | `lib/wizard/medication-form.ts` | Form state, per-step validation, `formToMedication` / `medicationToForm` | **yes** | `wizard-medication-form.spec.ts` |
