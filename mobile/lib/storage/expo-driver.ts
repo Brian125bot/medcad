@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { SqlDriver, SqlValue } from './ports';
+import { DATABASE_NAME } from './schema';
 
 /**
  * expo-sqlite implementation of SqlDriver.
@@ -11,12 +12,13 @@ import type { SqlDriver, SqlValue } from './ports';
  * (fails loudly with "database is locked" on contention rather than silently
  * interleaving, per the SDK 57 docs).
  */
-export function expoSqlDriver(): SqlDriver {
+/** `databaseName` defaults to the app database; the COR-88 benchmark passes its own isolated file. */
+export function expoSqlDriver(databaseName: string = DATABASE_NAME): SqlDriver {
   let db: SQLite.SQLiteDatabase | null = null;
   let gate: Promise<unknown> = Promise.resolve();
 
   async function getDb(): Promise<SQLite.SQLiteDatabase> {
-    if (!db) db = await SQLite.openDatabaseAsync('cadencerx.db');
+    if (!db) db = await SQLite.openDatabaseAsync(databaseName);
     return db;
   }
 
