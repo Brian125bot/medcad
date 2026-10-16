@@ -7,7 +7,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['lib/schedule/**/*.ts', 'lib/wizard/**/*.ts', 'lib/today/**/*.ts'],
+      include: ['lib/schedule/**/*.ts', 'lib/wizard/**/*.ts', 'lib/today/**/*.ts', 'lib/storage/device-benchmark.ts'],
+      // Vitest's default exclude drops any `*-benchmark.ts` file (it matches its
+      // bench pattern), which would silently skip the COR-88 harness. Only tests are excluded.
+      exclude: ['tests/**'],
       thresholds: {
         lines: 100,
         branches: 100,

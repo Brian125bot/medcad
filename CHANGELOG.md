@@ -25,6 +25,19 @@ the issue id and PR number where there are any.
 
 ## [Unreleased]
 
+### Added
+- **[mobile]** COR-88 device storage benchmark tooling (no device numbers yet):
+  `lib/storage/device-benchmark.ts` times cold init, a 10-medication / 500-log
+  single-transaction seed, a 365-day range query and a dose → taken update with
+  the adherence/streak recompute against PASS / WARN / FAIL gates; checks for
+  plaintext in raw rows, wrong-key rejection via the canary and atomic rollback;
+  reports JSON plus a Markdown table (Cold / Avg Warm over 3 warm runs). Uses an
+  isolated database file and keychain service. Dev-only screen
+  `app/benchmark.tsx` (from the Theme tab) with copy-to-clipboard. Repository
+  gains `getDoseLogsInRange()` and `importSnapshot()`; `expoSqlDriver()` takes
+  a database name. New dependencies `expo-device`, `expo-clipboard`. See
+  [`device-benchmark.md`](mobile/docs/device-benchmark.md). *(COR-88)*
+
 ## [1.0.0-alpha.1] - 2026-10-16
 
 First tagged version: an alpha pre-release of the CadenceRx mobile app. Not

@@ -17,6 +17,7 @@ verified — usually anything that needs a device — the page says so.
 | [development.md](development.md) | You need to set up, run, test or lint; you want to know where new code goes. |
 | [roadmap.md](roadmap.md) | You're choosing what to work on, or you hit something odd and want to know whether it's a known gap. Milestones, Linear status, and the **Known gaps and sharp edges** table. |
 | [storage.md](storage.md) | You touch persistence: the encrypted-column model, key lifecycle, migrations, and a table of verified behaviours (clamping, orphaned logs, undo drift). |
+| [device-benchmark.md](device-benchmark.md) | You need COR-88 device numbers: the dev-only storage benchmark screen, its gates, and how to run it on a phone. |
 | [schedule-engine.md](schedule-engine.md) | You touch "is it due / adherence / streak / supply" logic. The rules, the intentional differences from the web app, and how it's tested. |
 | [today-screen.md](today-screen.md) | You touch the Today tab: view model, optimistic store, rollback, gestures, rollover. |
 | [medication-wizard.md](medication-wizard.md) | You touch the add / edit flow: every field rule, form ⇄ `Medication` mapping, and a checklist for adding a field. |
