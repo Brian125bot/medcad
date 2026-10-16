@@ -1,4 +1,16 @@
-# CadenceRx — Local Encrypted Storage Layer (COR-71)
+# CadenceRx Web Prototype — Encrypted Storage (DEPRECATED for COR-71)
+
+> **⚠️ Scope notice — read before using this document.**
+>
+> This file documents the **browser-based web prototype** storage engine (`lib/storage/`, WebCrypto +
+> IndexedDB). It is **not** the storage layer that shipped for COR-71.
+>
+> The COR-71 implementation that actually merged is the **Expo / React Native mobile** storage layer in
+> `mobile/`, built on `expo-sqlite` + `expo-crypto` (AES-256-GCM) + `expo-secure-store` (Keychain / Keystore).
+> Its authoritative documentation is [`mobile/docs/storage.md`](../mobile/docs/storage.md).
+>
+> The web prototype is being replaced by the native app (see Linear project *CadenceRx Mobile v1.0*).
+> This file is retained only as a historical record of the prototype's design.
 
 ## Architecture Overview
 
@@ -118,14 +130,20 @@ The storage engine implements 4 normalized relational tables:
 
 ---
 
-## Latency Benchmarking
+## Latency Benchmarking (Web Prototype — Browser Only)
+
+> **⚠️ These numbers are browser/JavaScript-engine measurements, not mobile device measurements.**
+> They do **not** satisfy the COR-71 acceptance criterion *"write latency < 15ms"*, which is defined for the
+> native mobile storage layer. The mobile figure is tracked separately in
+> [COR-71 device verification](https://linear.app/coretek/issue/COR-71) and has not yet been measured on a
+> physical device. Do not quote the values below as evidence that the COR-71 performance target was met.
 
 Linear COR-71 establishes a strict performance target: **write latency below 15ms** for local operations.
 CadenceRx measures single-write latency, batch-write latency, and read latency directly in the application via `dbAdapter.runBenchmark()` and the top header badge (`StorageEncryptionBadge.tsx`).
 
-### Test Results
-- **Single Write Latency**: ~0.01 - 1.20ms (Target: < 15ms) — **PASS**
-- **Read Latency**: ~0.005 - 0.10ms — **PASS**
-- **5-Item Batch Transaction**: ~0.05 - 2.50ms — **PASS**
+### Test Results (Chromium / Node, prototype build)
+- **Single Write Latency**: ~0.01 - 1.20ms (Target: < 15ms) — **PASS (browser only)**
+- **Read Latency**: ~0.005 - 0.10ms — **PASS (browser only)**
+- **5-Item Batch Transaction**: ~0.05 - 2.50ms — **PASS (browser only)**
 - **WebCrypto AES-GCM Encrypt**: ~1.00ms
 - **WebCrypto AES-GCM Decrypt**: ~0.35ms
