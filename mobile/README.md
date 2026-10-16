@@ -8,9 +8,9 @@ web app's `lib/medication-data.ts` is ported here in later issues).
 **Status (2026-10-16):** the data layer is built — encrypted local storage
 (COR-71) and the schedule / streak / supply engine (COR-72) — plus the
 add / edit medication wizard (COR-75). Today, Insights, Cabinet and
-notifications are not built yet. **The app does not currently bundle**
-(`assets/fonts/SpaceMono-Regular.ttf` is missing — COR-90); tests, typecheck
-and lint work. Nothing has been run on a device yet.
+notifications are not built yet. The app bundles again after COR-90 restored
+`assets/fonts/SpaceMono-Regular.ttf`; tests, typecheck and lint work. Nothing
+has been run on a device yet (COR-91).
 
 **Documentation lives in [`docs/`](docs/README.md)** — start with
 [`docs/architecture.md`](docs/architecture.md), and see
@@ -53,7 +53,7 @@ Prefer the `className` utilities in JSX; use `cadenceTokens` from
 
 ```bash
 npm ci            # use the lockfile
-npx expo start    # currently fails to bundle: see COR-90 above
+npx expo start    # dev server (i / a / w for iOS / Android / web)
 ```
 
 Then press `i` (iOS simulator, macOS only), `a` (Android emulator), or `w`
@@ -86,7 +86,7 @@ app/                 # Expo Router screens (every file is a route)
   medication/        # new.tsx, [id].tsx — add / edit wizard, presented as modals
   modal.tsx          # template modal (unused placeholder)
   +not-found.tsx
-assets/              # icons, splash (fonts/ is missing — COR-90)
+assets/              # icons, splash, fonts (Space Mono)
 components/
   medication-wizard/ # MedicationWizard, NativePickerField, PillPreview
   (others)           # Expo template components (Themed, StyledText, …)
