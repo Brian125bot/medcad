@@ -59,7 +59,7 @@ function earliestStreakScanStart(medications: Medication[], todayKey: string): s
     if (diffDaysBetweenKeys(med.startDate, todayKey) < 0) {
       continue;
     }
-    if (earliest === null || diffDaysBetweenKeys(med.startDate, earliest) < 0) {
+    if (earliest === null || diffDaysBetweenKeys(earliest, med.startDate) < 0) {
       earliest = med.startDate;
     }
   }
