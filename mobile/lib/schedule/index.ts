@@ -27,7 +27,8 @@
  * day extends the streak only if every dose is `taken`/`skipped` with at
  * least one `taken`. Empty days are skipped (never break/extend). An
  * incomplete today never breaks the streak; a fully complete today extends
- * it. `skipped` is handled-but-not-extending.
+ * it. A past day in which every dose was skipped (none `taken`) resets the
+ * streak to 0, matching the web implementation.
  *
  * ## Supply rules (`supply.ts`)
  * `estimateDaysOfSupplyRemaining` walks real scheduled days forward from

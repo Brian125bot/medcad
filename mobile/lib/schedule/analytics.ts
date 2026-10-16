@@ -21,8 +21,10 @@
  *   they neither extend nor break the streak. An incomplete today (any
  *   `pending` dose) never breaks the streak — `currentStreakDays` keeps
  *   yesterday's value. A fully complete today extends it.
- * - `skipped` counts as handled (not a miss) for past days but, without a
- *   `taken` dose that day, does not extend the streak.
+ * - A past day in which every dose was skipped (none `taken`) RESETS the
+ *   streak to 0, matching the web implementation. Skipped doses are not
+ *   misses for the adherence rate, but a skipped-only day does not extend
+ *   the streak.
  */
 import type {
   AdherenceAnalyticsSummary,
