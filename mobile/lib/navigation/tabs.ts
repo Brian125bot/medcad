@@ -18,6 +18,17 @@ export type PrimaryTabName = PrimaryTab["name"];
 /** The tab the app opens on (`/` redirects here). */
 export const INITIAL_TAB: PrimaryTabName = "today";
 
+/** Route of the scaffold Theme screen (`app/(tabs)/two.tsx`). */
+export const THEME_TAB_ROUTE = "/two";
+
+/**
+ * `href` for the Theme tab: shown in development builds, hidden (`null`) in
+ * production. Pass `__DEV__`.
+ */
+export function themeTabHref(isDev: boolean): typeof THEME_TAB_ROUTE | null {
+  return isDev ? THEME_TAB_ROUTE : null;
+}
+
 /** Largest count a badge shows before collapsing to "99+". */
 export const MAX_TAB_BADGE_COUNT = 99;
 

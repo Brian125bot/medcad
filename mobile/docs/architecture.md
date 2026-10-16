@@ -49,9 +49,9 @@ primitives, with identical wire formats). Only three thin adapter files touch
 | --- | --- | --- | --- |
 | `app/_layout.tsx` | Root stack, fonts, splash, `SafeAreaProvider` | no | — |
 | `app/index.tsx` | Redirects `/` to `/today` | no | — |
-| `app/(tabs)/` | Four tabs (COR-73): `today` (placeholder, COR-74), `regimen` (medication list + "Add medication"), `insights` (placeholder, COR-80), `cabinet` (placeholder, COR-78). `two` (Theme — typography reference from the COR-70 scaffold) is a hidden tab (`href: null`), reachable at `/two` in dev builds only | no | — |
-| `components/tab-header/` | Shared tab header: title + locale date, "Local only" sync pill, "+ Add" action; set once in the tabs layout's `screenOptions` | no | — |
-| `lib/navigation/` | Tab set (`PRIMARY_TABS`), `toTabBadge`, header date formatting, `SYNC_STATUS_LABEL` | **yes** | `navigation.spec.ts` |
+| `app/(tabs)/` | Four tabs (COR-73): `today` (placeholder, COR-74), `regimen` (medication list; add via the header), `insights` (placeholder, COR-80), `cabinet` (placeholder, COR-78). `two` (Theme — typography reference from the COR-70 scaffold) is a tab in dev builds only (`href: themeTabHref(__DEV__)`; the screen also redirects to Today outside dev) | no | — |
+| `components/tab-header/` | Shared tab header: locale date with the "Local only" sync pill beside it, "+ Add" action on the right (no tab-name title); set once in the tabs layout's `screenOptions` | no | — |
+| `lib/navigation/` | Tab set (`PRIMARY_TABS`), `toTabBadge`, `themeTabHref`, header date formatting, `SYNC_STATUS_LABEL` | **yes** | `navigation.spec.ts` |
 | `app/medication/new.tsx`, `[id].tsx` | Add / edit modal screens; load + save via the repository | no | — |
 | `components/medication-wizard/` | `MedicationWizard`, `NativePickerField`, `PillPreview` | no | — |
 | `lib/wizard/medication-form.ts` | Form state, per-step validation, `formToMedication` / `medicationToForm` | **yes** | `wizard-medication-form.spec.ts` |

@@ -1,18 +1,24 @@
 import { Tabs } from "expo-router";
-import { CalendarCheck, ChartLine, type LucideIcon, Package, Pill } from "lucide-react-native";
+import { CalendarDays, type LucideIcon, Package, Palette, Pill, TrendingUp } from "lucide-react-native";
 
 import { TabHeaderActions, TabHeaderTitle } from "@/components/tab-header/TabHeader";
 import { cadenceTokens } from "@/constants/theme";
-import { INITIAL_TAB, PRIMARY_TABS, type PrimaryTabName, toTabBadge } from "@/lib/navigation/tabs";
+import {
+  INITIAL_TAB,
+  PRIMARY_TABS,
+  type PrimaryTabName,
+  themeTabHref,
+  toTabBadge,
+} from "@/lib/navigation/tabs";
 
 export const unstable_settings = {
   initialRouteName: INITIAL_TAB,
 };
 
 const TAB_ICONS: Record<PrimaryTabName, LucideIcon> = {
-  today: CalendarCheck,
+  today: CalendarDays,
   regimen: Pill,
-  insights: ChartLine,
+  insights: TrendingUp,
   cabinet: Package,
 };
 
@@ -30,7 +36,7 @@ export default function TabLayout() {
         headerStyle: { backgroundColor: cadenceTokens.background },
         headerTintColor: cadenceTokens.ink,
         headerTitleAlign: "left",
-        headerTitle: ({ children }) => <TabHeaderTitle title={children} />,
+        headerTitle: () => <TabHeaderTitle />,
         headerRight: () => <TabHeaderActions />,
       }}
     >
@@ -48,8 +54,15 @@ export default function TabLayout() {
           />
         );
       })}
-      {/* Scaffold typography reference: hidden from the tab bar, dev builds only. */}
-      <Tabs.Screen name="two" options={{ title: "Theme", href: null }} />
+      {/* Scaffold typography reference: a tab in development builds only. */}
+      <Tabs.Screen
+        name="two"
+        options={{
+          title: "Theme",
+          href: themeTabHref(__DEV__),
+          tabBarIcon: ({ color, size }) => <Palette color={color} size={size} />,
+        }}
+      />
     </Tabs>
   );
 }
