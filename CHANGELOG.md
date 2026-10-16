@@ -79,6 +79,9 @@ the issue id and PR number where there are any.
   done from the header's "+ Add" on every tab. *(COR-73 follow-up)*
 
 ### Fixed
+- **[mobile]** `npx tsc --noEmit` failed once Expo had generated typed routes
+  (`.expo/types/router.d.ts`): `ExternalLink`'s `href` is now typed as Expo
+  Router's `ExternalPathString` instead of `string`. *(COR-73 follow-up)*
 - **[mobile]** The wizard's "Pill look" step used to be discarded on save, and
   editing reset it to the default. *(PR #8)*
 - **[mobile]** `npm run lint` failed with *Cannot find module 'eslint'*. Also
