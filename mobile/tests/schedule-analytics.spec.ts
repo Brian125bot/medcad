@@ -283,6 +283,19 @@ describe('streak scan start', () => {
     expect(summary.bestStreakDays).toBe(90);
   });
 
+  it('skips leading unscheduled days when startDate precedes the first scheduled dose', () => {
+    // 2026-08-25 is a Tuesday; Monday-only med has no scheduled doses for its first 6 days
+    // (Tue..Sun), then 7 scheduled Mondays (2026-08-31..2026-10-12) before Friday TODAY.
+    const mondayOnly = makeMedication({
+      frequency: 'specific_days',
+      daysOfWeek: [1],
+      startDate: '2026-08-25',
+    });
+    const summary = computeAdherenceAnalytics([mondayOnly], seedTaken([mondayOnly], TODAY, -52), TODAY);
+    expect(summary.currentStreakDays).toBe(7);
+    expect(summary.bestStreakDays).toBe(7);
+  });
+
   it('keeps bestStreakDays from the older run after a miss and rebuild', () => {
     const med = makeMedication({ startDate: addDaysToKey(TODAY, -100) });
     const logs = seedTaken([med], TODAY, -100);
