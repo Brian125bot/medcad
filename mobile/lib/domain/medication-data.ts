@@ -34,6 +34,32 @@ export function getEffectiveLeadMinutes(
   return globalLeadMinutes;
 }
 
+export const PILL_SHAPES = ['round', 'capsule', 'oval'] as const;
+export type PillShape = (typeof PILL_SHAPES)[number];
+
+/** How the pill is drawn in the UI. Stored encrypted with the rest of the medication PHI. */
+export interface PillAppearance {
+  shape: PillShape;
+  primaryColor: string; // #rrggbb
+  secondaryColor: string; // #rrggbb
+}
+
+const PILL_HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+
+/** Strict runtime check for untrusted (stored or decoded) appearance values. */
+export function isPillAppearance(value: unknown): value is PillAppearance {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.shape === 'string' &&
+    (PILL_SHAPES as readonly string[]).includes(v.shape) &&
+    typeof v.primaryColor === 'string' &&
+    PILL_HEX_COLOR_PATTERN.test(v.primaryColor) &&
+    typeof v.secondaryColor === 'string' &&
+    PILL_HEX_COLOR_PATTERN.test(v.secondaryColor)
+  );
+}
+
 export interface MedicationInventory {
   currentUnits: number;
   capacityUnits: number;
@@ -53,6 +79,7 @@ export interface Medication {
   purpose: string; // e.g., "Lipid Management", "Blood Pressure", "Nutritional Supplement"
   instructions: string; // e.g., "Take with breakfast and a full glass of water"
   prescriber?: string;
+  appearance?: PillAppearance; // absent on medications saved before the pill builder
   frequency: ScheduleFrequency;
   daysOfWeek?: number[]; // 0 (Sun) to 6 (Sat) if frequency === 'specific_days'
   intervalDays?: number; // e.g. every 2 days if frequency === 'interval'

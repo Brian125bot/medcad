@@ -183,6 +183,7 @@ async function encryptMedicationRow(
   const prescriber = (row as { prescriber?: string | null }).prescriber ?? null;
   const pharmacyNote =
     (row as { inventory_pharmacy_note?: string | null }).inventory_pharmacy_note ?? null;
+  const appearance = (row as { appearance?: unknown }).appearance ?? null;
   const phi = {
     name: typeof name === 'string' ? name : String(name ?? ''),
     generic_name: genericName,
@@ -192,6 +193,7 @@ async function encryptMedicationRow(
     instructions,
     prescriber,
     inventory_pharmacy_note: pharmacyNote,
+    appearance,
   };
   return {
     id: row.id,

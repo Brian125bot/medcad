@@ -1,8 +1,10 @@
-import type {
-  Medication,
-  MedicationForm,
-  ScheduleFrequency,
-  TimeOfDayBlock,
+import {
+  isPillAppearance,
+  type Medication,
+  type MedicationForm,
+  type PillAppearance,
+  type ScheduleFrequency,
+  type TimeOfDayBlock,
 } from '../domain/medication-data';
 import type { MedicationRow, TimeSlotRow } from './schema';
 
@@ -15,6 +17,7 @@ export interface MedicationPhi {
   instructions?: string | null;
   prescriber?: string | null;
   inventory_pharmacy_note?: string | null;
+  appearance?: PillAppearance | null;
 }
 
 export interface TimeSlotPhi {
@@ -30,6 +33,8 @@ export interface StoredMedicationRow extends MedicationRow {
   instructions?: string | null;
   prescriber?: string | null;
   inventory_pharmacy_note?: string | null;
+  /** Decoded from the encrypted payload; treated as untrusted on read. */
+  appearance?: unknown;
 }
 
 export interface StoredTimeSlotRow extends TimeSlotRow {
@@ -56,6 +61,7 @@ export function domainMedicationToRows(med: Medication): {
       days_of_week: med.daysOfWeek ? JSON.stringify(med.daysOfWeek) : null,
       interval_days: med.intervalDays || null,
       prescriber: med.prescriber || null,
+      appearance: med.appearance ? { ...med.appearance } : null,
       active: med.active ? 1 : 0,
       inventory_current: med.inventory?.currentUnits ?? 0,
       inventory_capacity: med.inventory?.capacityUnits ?? 0,
@@ -110,6 +116,9 @@ export function rowsToDomainMedication(
     daysOfWeek: parsedDaysOfWeek,
     intervalDays: medRow.interval_days || undefined,
     prescriber: medRow.prescriber || undefined,
+    // Rows saved before the pill builder (or with a damaged payload) have no
+    // valid appearance; omit the key rather than inventing a look.
+    ...(isPillAppearance(medRow.appearance) ? { appearance: { ...medRow.appearance } } : {}),
     active: medRow.active === 1,
     timeSlots: [...slotRows]
       .sort((a, b) => a.time.localeCompare(b.time))

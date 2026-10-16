@@ -8,14 +8,22 @@
  *
  * Never log form values from here or callers: they are PHI.
  */
-import type {
-  Medication,
-  MedicationForm,
-  ScheduleFrequency,
-  TimeOfDayBlock,
-  TimeSlot,
+import {
+  PILL_SHAPES,
+  type Medication,
+  type MedicationForm,
+  type PillAppearance,
+  type PillShape,
+  type ScheduleFrequency,
+  type TimeOfDayBlock,
+  type TimeSlot,
 } from '../domain/medication-data';
 import { isValidDateKey } from '../schedule/date-keys';
+
+// Appearance types live in the domain (they are persisted); re-exported so
+// existing wizard imports keep working.
+export { PILL_SHAPES };
+export type { PillAppearance, PillShape };
 
 export const MEDICATION_FORMS: readonly MedicationForm[] = [
   'Tablet',
@@ -25,9 +33,6 @@ export const MEDICATION_FORMS: readonly MedicationForm[] = [
   'Inhaler',
   'Sublingual',
 ];
-
-export const PILL_SHAPES = ['round', 'capsule', 'oval'] as const;
-export type PillShape = (typeof PILL_SHAPES)[number];
 
 export const PILL_COLORS: readonly string[] = [
   '#ffffff',
@@ -43,12 +48,6 @@ export const PILL_COLORS: readonly string[] = [
   '#a8a29e',
   '#0f172a',
 ];
-
-export interface PillAppearance {
-  shape: PillShape;
-  primaryColor: string;
-  secondaryColor: string;
-}
 
 export const DEFAULT_PILL_APPEARANCE: PillAppearance = {
   shape: 'round',
@@ -104,16 +103,28 @@ export const LIMITS = {
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
-const DECIMAL_PATTERN = /^\d+(\.\d+)?$/;
+const DECIMAL_PATTERN = /^(\d+(\.\d+)?|\.\d+)$/;
+/**
+ * Comma as the decimal mark ("1,5", "0,25", ",5"), as typed on decimal-pad
+ * keyboards in comma locales. Only 1-2 digits may follow, so a thousands-style
+ * "1,000" stays invalid instead of being silently read as 1.
+ */
+const COMMA_DECIMAL_PATTERN = /^(\d*),(\d{1,2})$/;
 const INTEGER_PATTERN = /^\d+$/;
 
 export function isValidTime(value: string): boolean {
   return TIME_PATTERN.test(value);
 }
 
-/** Parses a non-negative decimal string; returns NaN for anything else (incl. "", "-1", "1e3"). */
+/**
+ * Parses a non-negative decimal string ("1.5", ".5", and "1,5" with a 1-2
+ * digit comma fraction); returns NaN for anything else (incl. "", "-1", "1e3",
+ * "1,000").
+ */
 export function parseDecimal(value: string): number {
-  const trimmed = value.trim();
+  let trimmed = value.trim();
+  const comma = COMMA_DECIMAL_PATTERN.exec(trimmed);
+  if (comma) trimmed = `${comma[1] || '0'}.${comma[2]}`;
   return DECIMAL_PATTERN.test(trimmed) ? Number(trimmed) : Number.NaN;
 }
 
@@ -220,7 +231,7 @@ function validateSchedule(state: MedicationFormState, errors: FormErrors): void 
     }
     const dose = parseDecimal(slot.doseUnits);
     if (!(dose > 0)) {
-      errors[`${p}.doseUnits`] = 'Dose must be greater than 0.';
+      errors[`${p}.doseUnits`] = 'Dose must be a number greater than 0, e.g. 1 or 0.5.';
     } else if (dose > LIMITS.doseUnitsMax) {
       errors[`${p}.doseUnits`] = `Dose must be ${LIMITS.doseUnitsMax} or fewer units.`;
     }
@@ -349,6 +360,7 @@ export function formToMedication(state: MedicationFormState, options: FormToMedi
     name: state.name.trim(),
     strength: state.strength.trim(),
     form: state.form as MedicationForm,
+    appearance: { ...state.appearance },
     purpose: existing?.purpose ?? '',
     instructions: existing?.instructions ?? '',
     frequency: state.frequency,
@@ -382,7 +394,7 @@ export function formToMedication(state: MedicationFormState, options: FormToMedi
 export function medicationToForm(
   med: Medication,
   todayKey: string,
-  appearance: PillAppearance = DEFAULT_PILL_APPEARANCE,
+  appearance: PillAppearance = med.appearance ?? DEFAULT_PILL_APPEARANCE,
 ): MedicationFormState {
   return {
     name: med.name,

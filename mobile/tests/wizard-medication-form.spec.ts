@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Medication } from '../lib/domain/medication-data';
 import {
   createEmptyForm,
+  DEFAULT_PILL_APPEARANCE,
   dateToTime,
   firstInvalidStep,
   formToMedication,
@@ -61,9 +62,18 @@ const existing: Medication = {
 describe('parsers', () => {
   it('parses decimals and integers strictly', () => {
     expect(parseDecimal(' 1.5 ')).toBe(1.5);
-    for (const bad of ['', '-1', '1e3', 'abc', '.5']) expect(parseDecimal(bad)).toBeNaN();
+    for (const bad of ['', '-1', '1e3', 'abc', '5.', '1.', '.', ',', '1,', '1.5.5']) expect(parseDecimal(bad)).toBeNaN();
     expect(parseInteger('7')).toBe(7);
     for (const bad of ['', '-1', '1.5', 'x']) expect(parseInteger(bad)).toBeNaN();
+  });
+  it('accepts a leading-dot or comma decimal mark, but never guesses at thousands separators', () => {
+    expect(parseDecimal('.5')).toBe(0.5);
+    expect(parseDecimal('1,5')).toBe(1.5);
+    expect(parseDecimal('0,25')).toBe(0.25);
+    expect(parseDecimal(',5')).toBe(0.5);
+    expect(parseDecimal(' 2,5 ')).toBe(2.5);
+    // "1,000" must not be read as 1 (nor as 1000): it is rejected outright.
+    for (const bad of ['1,000', '1,5,5', '1,5.5', '1.5,5', '-1,5']) expect(parseDecimal(bad)).toBeNaN();
   });
   it('validates HH:mm', () => {
     expect(isValidTime('00:00')).toBe(true);
@@ -153,6 +163,14 @@ describe('validation', () => {
     expect(slotErrors(e, 1)).toEqual({ time: e['timeSlots.1.time'], doseUnits: e['timeSlots.1.doseUnits'], leadMinutes: e['timeSlots.1.leadMinutes'] });
   });
 
+  it('gives one actionable message for any unusable dose, and accepts comma / leading-dot input', () => {
+    const slot = (doseUnits: string) => ({ time: '08:00', doseUnits, leadMinutes: '', reminderEnabled: true });
+    const err = (doseUnits: string) => validateStep('schedule', validForm({ timeSlots: [slot(doseUnits)] }))['timeSlots.0.doseUnits'];
+    for (const bad of ['1,000', 'abc', '', '0', '-1']) expect(err(bad)).toMatch(/number greater than 0/);
+    expect(err('1,5')).toBeUndefined();
+    expect(err('.5')).toBeUndefined();
+  });
+
   it('validates inventory', () => {
     const e = validateStep('inventory', validForm({
       currentUnits: '-1', capacityUnits: '0', lowThresholdUnits: 'x', lastRefilledAt: '2026-04-31', pharmacyNote: 'n'.repeat(201),
@@ -219,6 +237,38 @@ describe('formToMedication', () => {
     ]);
     expect(med.inventory).toEqual({ currentUnits: 30, capacityUnits: 30, lowThresholdUnits: 5, lastRefilledAt: TODAY });
     expect(med.startDate).toBe(TODAY);
+    expect(med.appearance).toEqual(DEFAULT_PILL_APPEARANCE);
+  });
+
+  it('parses comma decimals into the saved record', () => {
+    const med = formToMedication(
+      validForm({
+        timeSlots: [{ time: '08:00', doseUnits: '1,5', leadMinutes: '', reminderEnabled: true }],
+        currentUnits: '29,5',
+        lowThresholdUnits: ',5',
+      }),
+      { newId: ids() },
+    );
+    expect(med.timeSlots[0].doseUnits).toBe(1.5);
+    expect(med.inventory.currentUnits).toBe(29.5);
+    expect(med.inventory.lowThresholdUnits).toBe(0.5);
+  });
+
+  it('persists the pill look the user picked (a copy, not the form object)', () => {
+    const appearance = { shape: 'oval' as const, primaryColor: '#fca5a5', secondaryColor: '#0f172a' };
+    const med = formToMedication(validForm({ appearance }), { newId: ids() });
+    expect(med.appearance).toEqual(appearance);
+    expect(med.appearance).not.toBe(appearance);
+  });
+
+  it('round-trips the pill look through edit', () => {
+    const appearance = { shape: 'capsule' as const, primaryColor: '#93c5fd', secondaryColor: '#fdba74' };
+    const form = medicationToForm({ ...existing, appearance }, TODAY);
+    expect(form.appearance).toEqual(appearance);
+    expect(formToMedication(form, { newId: ids(), existing: { ...existing, appearance } }).appearance).toEqual(appearance);
+    // No stored look (saved before the pill builder) -> default; an explicit override still wins.
+    expect(medicationToForm(existing, TODAY).appearance).toEqual(DEFAULT_PILL_APPEARANCE);
+    expect(medicationToForm({ ...existing, appearance }, TODAY, DEFAULT_PILL_APPEARANCE).appearance).toEqual(DEFAULT_PILL_APPEARANCE);
   });
 
   it('maps specific days (deduped, sorted) and interval', () => {
