@@ -1,14 +1,14 @@
 /**
  * COR-72 unit tests for the adherence analytics.
  *
- * NOTE: the "today has no scheduled doses" case pins the ported web behavior
- * (`currentStreakDays` 0); the follow-up streak fix changes that to preserve
- * yesterday's streak — see the fix commit.
+ * Streak expectations below assume the uncapped scan (from the earliest valid
+ * startDate through today): see "streak history depth" for the 46/47/90/400
+ * day cases that the old fixed -45..0 window could not represent.
  */
 import { describe, expect, it } from 'vitest';
 import type { DoseLogMap, Medication } from '../lib/domain/medication-data';
 import { addDaysToKey } from '../lib/schedule/date-keys';
-import { computeAdherenceAnalytics } from '../lib/schedule/analytics';
+import { computeAdherenceAnalytics, MAX_STREAK_LOOKBACK_DAYS } from '../lib/schedule/analytics';
 
 const TODAY = '2026-10-16'; // a Friday
 
@@ -203,5 +203,124 @@ describe('computeAdherenceAnalytics', () => {
     expect(summary.totalTaken30d).toBe(29);
     expect(summary.totalScheduled30d).toBe(29);
     expect(summary.currentStreakDays).toBe(29);
+  });
+});
+
+/** Seeds `taken` logs for every slot of every med on each offset in [fromOffset, -1]. */
+function seedTaken(meds: Medication[], today: string, fromOffset: number): DoseLogMap {
+  const logs: DoseLogMap = {};
+  for (let offset = fromOffset; offset <= -1; offset += 1) {
+    const dateKey = addDaysToKey(today, offset);
+    for (const med of meds) {
+      for (const slot of med.timeSlots) {
+        const key = `${dateKey}_${med.id}_${slot.id}`;
+        logs[key] = { key, dateKey, medicationId: med.id, slotId: slot.id, status: 'taken', loggedAt: slot.time };
+      }
+    }
+  }
+  return logs;
+}
+
+function withTodayTaken(logs: DoseLogMap, today: string, medId = 'med-1', slotId = 'slot-a'): DoseLogMap {
+  const key = `${today}_${medId}_${slotId}`;
+  return { ...logs, [key]: { key, dateKey: today, medicationId: medId, slotId, status: 'taken', loggedAt: '08:00' } };
+}
+
+describe('streak history depth (no 46-day cap)', () => {
+  for (const days of [46, 47, 90]) {
+    it(`${days} taken days: pending today -> ${days}/${days}, taken today -> ${days + 1}/${days + 1}`, () => {
+      // startDate is exactly the first logged day.
+      const med = makeMedication({ startDate: addDaysToKey(TODAY, -days) });
+      const logs = seedTaken([med], TODAY, -days);
+      const pending = computeAdherenceAnalytics([med], logs, TODAY);
+      expect(pending.currentStreakDays).toBe(days);
+      expect(pending.bestStreakDays).toBe(days);
+      const taken = computeAdherenceAnalytics([med], withTodayTaken(logs, TODAY), TODAY);
+      expect(taken.currentStreakDays).toBe(days + 1);
+      expect(taken.bestStreakDays).toBe(days + 1);
+    });
+  }
+
+  it('400 taken days crossing a year boundary, a leap day, and both DST transitions', () => {
+    // 2023-04-28..2024-06-01 includes 2024-02-29, Dec 2023/Jan 2024, and the
+    // Nov 2023 + Mar 2024 US transitions. Runs under every TZ in test:tz.
+    const today = '2024-06-01';
+    const med = makeMedication({ startDate: addDaysToKey(today, -400) });
+    expect(med.startDate).toBe('2023-04-28');
+    const logs = seedTaken([med], today, -400);
+    const pending = computeAdherenceAnalytics([med], logs, today);
+    expect(pending.currentStreakDays).toBe(400);
+    expect(pending.bestStreakDays).toBe(400);
+    const taken = computeAdherenceAnalytics([med], withTodayTaken(logs, today), today);
+    expect(taken.currentStreakDays).toBe(401);
+    expect(taken.bestStreakDays).toBe(401);
+  });
+});
+
+describe('streak scan start', () => {
+  it('starts at the earlier startDate regardless of medication order', () => {
+    const early = makeMedication({ id: 'early', startDate: addDaysToKey(TODAY, -90) });
+    const late = makeMedication({ id: 'late', startDate: addDaysToKey(TODAY, -10) });
+    // Logs for both meds across the whole range; `late` is simply unscheduled
+    // (and therefore ignored) before its own start.
+    for (const meds of [[early, late], [late, early]]) {
+      const summary = computeAdherenceAnalytics(meds, seedTaken(meds, TODAY, -90), TODAY);
+      expect(summary.currentStreakDays).toBe(90);
+      expect(summary.bestStreakDays).toBe(90);
+    }
+  });
+
+  it('lets an interval medication sit out its unscheduled days without breaking the streak', () => {
+    const daily = makeMedication({ id: 'daily', startDate: addDaysToKey(TODAY, -90) });
+    const everyOther = makeMedication({
+      id: 'every-other',
+      frequency: 'interval',
+      intervalDays: 2,
+      startDate: addDaysToKey(TODAY, -90),
+    });
+    const summary = computeAdherenceAnalytics([daily, everyOther], seedTaken([daily, everyOther], TODAY, -90), TODAY);
+    expect(summary.currentStreakDays).toBe(90);
+    expect(summary.bestStreakDays).toBe(90);
+  });
+
+  it('keeps bestStreakDays from the older run after a miss and rebuild', () => {
+    const med = makeMedication({ startDate: addDaysToKey(TODAY, -100) });
+    const logs = seedTaken([med], TODAY, -100);
+    const missKey = `${addDaysToKey(TODAY, -40)}_med-1_slot-a`;
+    logs[missKey] = { ...logs[missKey], status: 'missed' };
+    const summary = computeAdherenceAnalytics([med], logs, TODAY);
+    // Older run -100..-41 (60 days); miss at -40; rebuild -39..-1 (39 days).
+    expect(summary.currentStreakDays).toBe(39);
+    expect(summary.bestStreakDays).toBe(60);
+  });
+
+  it('ignores an invalid startDate on one medication', () => {
+    const bad = makeMedication({ id: 'bad', startDate: 'not-a-date' });
+    const good = makeMedication({ id: 'good', startDate: addDaysToKey(TODAY, -30) });
+    const summary = computeAdherenceAnalytics([bad, good], seedTaken([good], TODAY, -30), TODAY);
+    expect(summary.currentStreakDays).toBe(30);
+    expect(summary.bestStreakDays).toBe(30);
+    expect(summary.totalTaken30d).toBe(29);
+    expect(summary.totalScheduled30d).toBe(29);
+  });
+
+  it('reports zero streaks when no startDate is usable', () => {
+    const bad = makeMedication({ startDate: 'bogus' });
+    const future = makeMedication({ id: 'future', startDate: '2027-01-01' });
+    for (const meds of [[bad], [future]]) {
+      const summary = computeAdherenceAnalytics(meds, {}, TODAY);
+      expect(summary.currentStreakDays).toBe(0);
+      expect(summary.bestStreakDays).toBe(0);
+      expect(summary.totalScheduled30d).toBe(0);
+    }
+  });
+
+  it('saturates streaks at MAX_STREAK_LOOKBACK_DAYS for ancient start dates', () => {
+    const med = makeMedication({ startDate: '1900-01-01' });
+    const logs = seedTaken([med], TODAY, -MAX_STREAK_LOOKBACK_DAYS);
+    const summary = computeAdherenceAnalytics([med], logs, TODAY);
+    // True history runs to 1900, but the scan clips at the bound.
+    expect(summary.currentStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
+    expect(summary.bestStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
   });
 });

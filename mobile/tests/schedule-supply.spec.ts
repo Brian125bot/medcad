@@ -133,3 +133,34 @@ describe('computeRecommendedNextFillDate', () => {
     expect(computeRecommendedNextFillDate(empty, '2026-10-16')).toBe('2026-10-16');
   });
 });
+
+describe('zero and negative stock (each case pins the documented early 0 return)', () => {
+  const TODAY = '2026-10-16'; // a Friday; tomorrow is Saturday
+  function stocked(units: number, overrides: Partial<Medication> = {}): Medication {
+    return makeMedication({
+      inventory: { currentUnits: units, capacityUnits: 30, lowThresholdUnits: 5, lastRefilledAt: '2026-09-30' },
+      ...overrides,
+    });
+  }
+
+  for (const units of [0, -3]) {
+    it(`${units} stock with a dose scheduled today returns 0 (depletion is immediate)`, () => {
+      expect(estimateDaysOfSupplyRemaining(stocked(units), TODAY)).toBe(0);
+    });
+
+    it(`${units} stock with no dose today but a dose later returns 0 (kills the "< 0" mutant, which would report the later offset)`, () => {
+      const saturdayOnly = stocked(units, { frequency: 'specific_days', daysOfWeek: [6], startDate: '2026-09-01' });
+      expect(estimateDaysOfSupplyRemaining(saturdayOnly, TODAY)).toBe(0);
+    });
+
+    it(`${units} stock with an empty schedule returns 0, not the 999 sentinel (kills the "< 0" mutant, which would walk to the horizon)`, () => {
+      const noSchedule = stocked(units, { frequency: 'specific_days', daysOfWeek: [] });
+      expect(estimateDaysOfSupplyRemaining(noSchedule, TODAY)).toBe(0);
+    });
+
+    it(`${units} stock on an inactive medication returns 0, not the 999 sentinel (kills the "< 0" mutant, which would walk to the horizon)`, () => {
+      const paused = stocked(units, { active: false });
+      expect(estimateDaysOfSupplyRemaining(paused, TODAY)).toBe(0);
+    });
+  }
+});

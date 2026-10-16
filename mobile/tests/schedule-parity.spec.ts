@@ -4,8 +4,13 @@
  * Imports the public API from `lib/schedule/index` (also giving coverage of
  * the index module) and the legacy web module, then asserts identical outputs
  * over a representative matrix — except for the intentional, documented
- * divergences: forward-simulation supply, strict invalid-input handling, and
- * (after the streak fix) today-with-no-doses.
+ * divergences: forward-simulation supply, strict invalid-input handling,
+ * today-with-no-doses streak preservation, and streaks longer than 46 days
+ * (the web module keeps its fixed -45..0 scan and "60 days" comment; it is
+ * out of scope and intentionally untouched).
+ *
+ * Histories of 46 days or fewer must match the web implementation exactly;
+ * longer histories assert both sides explicitly.
  *
  * Runs under every TZ in `test:tz`; the DST-transition cases pin
  * America/Chicago behavior explicitly.
@@ -259,5 +264,31 @@ describe('parity: computeAdherenceAnalytics', () => {
     }
     expect(web.computeAdherenceAnalytics([med], logs, today).currentStreakDays).toBe(0);
     expect(portedAnalytics([med], logs, today).currentStreakDays).toBe(8);
+  });
+
+  it('diverges by uncapped scan on histories longer than 46 days', () => {
+    // Review reproduction: daily med from 2025-01-01, 90 taken days, today 2026-10-16.
+    const today = '2026-10-16';
+    const med = makeMedication({ startDate: '2025-01-01' });
+    const logs: DoseLogMap = {};
+    for (let offset = -90; offset <= -1; offset += 1) {
+      const dateKey = webAdd(today, offset);
+      const key = `${dateKey}_med-1_slot-a`;
+      logs[key] = { key, dateKey, medicationId: 'med-1', slotId: 'slot-a', status: 'taken', loggedAt: '08:00' };
+    }
+    const webPending = web.computeAdherenceAnalytics([med], logs, today);
+    expect(webPending.currentStreakDays).toBe(45);
+    expect(webPending.bestStreakDays).toBe(45);
+    const portedPending = portedAnalytics([med], logs, today);
+    expect(portedPending.currentStreakDays).toBe(90);
+    expect(portedPending.bestStreakDays).toBe(90);
+    const takenKey = `${today}_med-1_slot-a`;
+    const logsTaken = { ...logs, [takenKey]: { key: takenKey, dateKey: today, medicationId: 'med-1', slotId: 'slot-a', status: 'taken' as const, loggedAt: '08:00' } };
+    const webTaken = web.computeAdherenceAnalytics([med], logsTaken, today);
+    expect(webTaken.currentStreakDays).toBe(46);
+    expect(webTaken.bestStreakDays).toBe(46);
+    const portedTaken = portedAnalytics([med], logsTaken, today);
+    expect(portedTaken.currentStreakDays).toBe(91);
+    expect(portedTaken.bestStreakDays).toBe(91);
   });
 });
