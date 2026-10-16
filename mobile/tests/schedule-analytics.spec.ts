@@ -171,12 +171,14 @@ describe('computeAdherenceAnalytics', () => {
     expect(summary.totalScheduled30d).toBe(29);
   });
 
-  it('pins the ported quirk: today with no scheduled doses reports streak 0', () => {
+  it('today with no scheduled doses preserves yesterday’s streak (streak fix)', () => {
     // A weekend-only schedule evaluated on a Friday: today contributes nothing.
     const med = makeMedication({ frequency: 'specific_days', daysOfWeek: [0, 6], startDate: '2026-09-01' });
     const summary = computeAdherenceAnalytics([med], seedHistory([med]), TODAY);
     expect(summary.totalScheduled30d).toBeGreaterThan(0);
-    expect(summary.currentStreakDays).toBe(0);
+    // 8 weekend days scheduled-and-taken since the last unseeded gap, none missed.
+    expect(summary.currentStreakDays).toBe(8);
+    expect(summary.bestStreakDays).toBe(8);
   });
 
   it('skips empty days without breaking or extending the streak', () => {

@@ -104,6 +104,11 @@ export function computeAdherenceAnalytics(
     const dKey = addDaysToKey(todayKey, offset);
     const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
     if (doses.length === 0) {
+      // No scheduled doses: neither breaks nor extends. When today itself is
+      // empty, the current streak is yesterday's running streak (not zero).
+      if (offset === 0) {
+        currentStreakDays = runningStreak;
+      }
       continue;
     }
 

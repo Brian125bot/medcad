@@ -154,7 +154,6 @@ describe('parity: getScheduledDosesForDate', () => {
         const theirs = web.getScheduledDosesForDate(meds, logs, dateKey, today);
         expect(mine.map((d) => [d.key, d.effectiveStatus])).toEqual(
           theirs.map((d) => [d.key, d.effectiveStatus]),
-          `${dateKey}`,
         );
         expect(mine).toEqual(theirs);
       }
@@ -247,5 +246,18 @@ describe('parity: computeAdherenceAnalytics', () => {
       expect(mine.totalTaken30d).toBe(29);
       expect(mine.currentStreakDays).toBe(29);
     }
+  });
+
+  it('diverges by streak fix on today-with-no-doses: web reports 0, ported preserves history', () => {
+    const today = '2026-10-16'; // Friday; weekend-only schedule has no doses today
+    const med = makeMedication({ frequency: 'specific_days', daysOfWeek: [0, 6], startDate: '2026-09-01' });
+    const logs: DoseLogMap = {};
+    for (let offset = -29; offset <= -1; offset += 1) {
+      const dateKey = webAdd(today, offset);
+      const key = `${dateKey}_med-1_slot-a`;
+      logs[key] = { key, dateKey, medicationId: 'med-1', slotId: 'slot-a', status: 'taken', loggedAt: '08:00' };
+    }
+    expect(web.computeAdherenceAnalytics([med], logs, today).currentStreakDays).toBe(0);
+    expect(portedAnalytics([med], logs, today).currentStreakDays).toBe(8);
   });
 });
