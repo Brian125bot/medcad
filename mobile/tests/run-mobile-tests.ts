@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const suites = readdirSync(dir)
-  .filter((file) => file.endsWith('.test.ts') || file.endsWith('.test.mts'))
+  .filter((file) => file.endsWith('.test.ts') || file.endsWith('.test.mts') || file === 'storage-core.mts')
   .sort()
   .map((file) => join(dir, file));
 

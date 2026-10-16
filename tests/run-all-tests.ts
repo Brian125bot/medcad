@@ -16,6 +16,7 @@ const suites = [
   { name: '2. Schema Migration & Legacy Safety Suite', cmd: 'tsx tests/migration.test.ts' },
   { name: '3. Notification Engine & Alarm Regression Suite', cmd: 'tsx tests/notifications.test.ts' },
   { name: '4. Slot-Reminder Persistence & Concurrency Suite', cmd: 'tsx tests/slot-reminder-persistence.test.ts' },
+  { name: '5. Mobile Encrypted SQLite Storage Suite (COR-71)', cmd: 'tsx mobile/tests/run-mobile-tests.ts' },
 ];
 
 let allPassed = true;

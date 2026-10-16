@@ -182,6 +182,18 @@ async function main() {
     // Plaintext columns contain no drug names.
     const rawNames = await driver.all<{ id: string }>('SELECT id FROM medications');
     assert.ok(rawNames.every((r) => r.id.startsWith('seed-med-')));
+
+    // resetSampleData() also uses anonymized IDs and preserves stock + historical loggedAt.
+    const resetResult = await ctx.repository.resetSampleData();
+    assert.ok(resetResult.medications.length > 0);
+    assert.ok(resetResult.medications.every((m) => m.id.startsWith('seed-med-')));
+    for (const med of resetResult.medications) {
+      assert.strictEqual(
+        med.inventory.currentUnits,
+        expectedByIndex.get(med.id),
+        `resetSampleData stock untouched for ${med.id}`,
+      );
+    }
     await ctx.repository.close();
   }
 

@@ -775,7 +775,7 @@ export class MedicationRepository {
 
   public async bulkSaveDoseLogs(logs: import('../domain/medication-data').DoseLogMap): Promise<void> {
     for (const log of Object.values(logs)) {
-      await this.logDose(log.dateKey, log.medicationId, log.slotId, log.status, log.note);
+      await this.logDoseAt(log.dateKey, log.medicationId, log.slotId, log.status, log.loggedAt, log.note);
     }
   }
 
@@ -861,16 +861,18 @@ export class MedicationRepository {
 
   public async resetSampleData() {
     await this.ensureReady();
-    const { createInitialSeedData, toDateKey } = await import('../domain/medication-data');
-    const initial = createInitialSeedData(toDateKey(new Date()));
+    const { toDateKey } = await import('../domain/medication-data');
+    const todayKey = toDateKey(new Date());
     await this.platform.driver.transaction(async () => {
       await this.platform.driver.run('DELETE FROM dose_logs');
       await this.platform.driver.run('DELETE FROM time_slots');
       await this.platform.driver.run('DELETE FROM medications');
     });
-    await this.bulkSaveMedications(initial.medications);
-    await this.bulkSaveDoseLogs(initial.logs);
-    return initial;
+    await seedDemoVault(this, todayKey);
+    return {
+      medications: await this.getAllMedications(),
+      logs: await this.getAllDoseLogs(),
+    };
   }
 
   public async getStorageEngineInfo(): Promise<StorageEngineInfo> {
@@ -1077,10 +1079,7 @@ export async function createStorageContext(platform: StoragePlatform): Promise<S
         .get<UserPreferenceRow>('SELECT * FROM user_preferences WHERE pref_key = ?', ['__seeded_demo__'])
         .catch(() => null);
       if (seededFlag) return;
-      const { createInitialSeedData } = await import('../domain/medication-data');
-      const seed = createInitialSeedData(options?.seedTodayKey || new Date().toISOString().slice(0, 10));
-      await repository.bulkSaveMedications(seed.medications);
-      await repository.bulkSaveDoseLogs(seed.logs);
+      await seedDemoVault(repository, options?.seedTodayKey || new Date().toISOString().slice(0, 10));
       await repository.setPreference('__seeded_demo__', true);
     },
   };
