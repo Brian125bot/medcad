@@ -68,10 +68,19 @@ Because `expo-sqlite` does not bundle SQLCipher whole-file encryption in Expo Go
 
 ---
 
-## Latency Benchmark
+## Latency Benchmark (local developer machine — NOT CI, NOT device)
 
 Linear COR-71 requires local encrypted write latency below **15ms**. `repository.runBenchmark()` times the full encrypt + SQLite `INSERT` path (`encryptDoseLogRow` + `driver.run`), indexed single-row read, and a 5-row encrypted batch transaction:
 
-- **Single Encrypted Write Latency (CI Node SQLite + AES-256-GCM)**: ~0.10 – 1.50ms (Target: `< 15ms`) — **PASS**
-- **Indexed Single-Row Read Latency**: ~0.02 – 0.30ms — **PASS**
-- **5-Row Encrypted Batch Transaction**: ~0.40 – 3.50ms — **PASS**
+> **⚠️ These numbers are local desktop runs. They are not CI numbers and they are not device numbers.**
+> This repository has **no CI** (`.github/` does not exist), so no "CI value" for this benchmark can exist.
+> The figures below come from running the benchmark on a developer machine (Node + `node:sqlite`), which
+> does **not** satisfy the COR-71 acceptance criterion *"write latency < 15ms"* — that criterion is defined
+> for the native mobile storage layer (`expo-sqlite` + `expo-crypto` + `expo-secure-store`) on a physical
+> device. Device measurement is tracked in
+> [COR-88](https://linear.app/coretek/issue/COR-88). Until device numbers are recorded, **no claim that the
+> COR-71 target was met on device is supported by this document.** Do not quote the values below as such.
+
+- **Single Encrypted Write Latency (Node + `node:sqlite` on a developer machine — NOT CI)**: ~0.10 – 1.50ms (Target: `< 15ms`) — **PASS locally only**
+- **Indexed Single-Row Read Latency (local developer machine)**: ~0.02 – 0.30ms — **PASS locally only**
+- **5-Row Encrypted Batch Transaction (local developer machine)**: ~0.40 – 3.50ms — **PASS locally only**
