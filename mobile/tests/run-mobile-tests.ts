@@ -14,4 +14,7 @@ for (const suite of suites) {
   console.log(`--- ${suite.split(/[\\/]/).pop()} ---`);
   execSync(`npx tsx "${suite}"`, { stdio: 'inherit', cwd: join(dir, '..') });
 }
+console.log('\n=== CadenceRx mobile COR-72 schedule suites (vitest, with coverage thresholds) ===\n');
+console.log('--- vitest run --coverage ---');
+execSync('npx vitest run --coverage', { stdio: 'inherit', cwd: join(dir, '..') });
 console.log('\nAll mobile suites passed.');
