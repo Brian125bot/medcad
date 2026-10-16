@@ -29,12 +29,14 @@ Points are Linear estimates. "Done" means closed in Linear.
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
 | COR-73 | Bottom tab navigation and headers | 3 | **Done** | PR #10 + agreed-design follow-up (header, icons, Theme tab, Regimen) |
-| COR-74 | Daily protocol screen with swipe gestures | 5 | In review | Built: [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-91). Blocks COR-77 |
+| COR-74 | Daily protocol screen with swipe gestures | 5 | **Done** | PR #12. [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-91). Blocks COR-77 |
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
-| COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | Backlog | **Overlaps PR #8** (merged) — see below |
+| COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | **Done** | Delivered by PR #8 (appearance in the encrypted payload, no migration) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | **Done** | `SpaceMono-Regular.ttf` + OFL in `assets/fonts/` |
 | COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Unblocked by COR-90 |
 | COR-93 | Handle `dose_logs` for slots removed in edit | 2 | Backlog | Orphaned logs when dose times are removed in edit |
+| COR-95 | Editor save overwrites stock logged on Today | – | **Done** | `9e2d6db`; was gap 6 |
+| COR-96 | Undo refunds current slot dose, not units taken | – | **Done** | `b5aefbd`; was gap 4 |
 
 ### M3 — Background notifications and alarms
 
@@ -97,10 +99,10 @@ that are not recorded here.
 
 1. **COR-91 / COR-88 on-device** — COR-90 unblocked bundling; run storage and
    wizard QA on iOS/Android next.
-2. **COR-74** — Today is the first real caller of `logDose` / `undoDose`; finish
-   device QA and COR-93 phantom-dose work alongside it.
-3. **COR-93 alongside COR-74** — Today must not show phantom doses for removed
-   slots, and it is the first screen where the undo drift (below) can occur.
+2. **Device QA of COR-74 (Today)** — gestures, haptics, ring and layout have
+   only been type-checked.
+3. **COR-93** — Today must not show phantom doses for removed slots (the undo
+   drift is fixed by COR-96).
 4. **COR-76** is independent of 73/74 and can run in parallel; its design work
    (post-save hook, rolling schedule window) needs no device, its acceptance
    test does.

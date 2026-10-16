@@ -63,7 +63,8 @@ skip. Failures (e.g. web) are ignored.
 
 - **Snooze** is not offered: there is no reminder scheduler yet (COR-76). The
   swipe-left sheet only skips, with an optional reason saved as the log note.
-- Undo of a take refunds the slot's *current* dose units
-  ([roadmap gap 4](roadmap.md#known-gaps-and-sharp-edges)).
+- Undo of a take (or changing it to skipped / pending) refunds the units
+  recorded on the log (`unitsTaken`, COR-96); logs from before that fix fall
+  back to the slot's current dose, or 1 unit.
 - Not run on a device yet (COR-91). Gestures, haptics and
   the ring animation are type-checked only.
