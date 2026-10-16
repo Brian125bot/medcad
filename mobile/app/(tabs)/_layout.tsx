@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { House, SwatchBook } from "lucide-react-native";
+import { House, Pill, SwatchBook } from "lucide-react-native";
 
 import { cadenceTokens } from "@/constants/theme";
 
@@ -21,6 +21,13 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <House color={color} size={size} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="medications"
+        options={{
+          title: "Medications",
+          tabBarIcon: ({ color, size }) => <Pill color={color} size={size} />,
         }}
       />
       <Tabs.Screen

@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@react-native-community/datetimepicker": "9.1.0",
     "expo": "~57.0.29",
     "expo-constants": "~57.0.22",
     "expo-crypto": "~57.0.4",
@@ -44,7 +45,8 @@
     "test": "npx tsx tests/run-mobile-tests.ts",
     "test:schedule": "vitest run --coverage",
     "test:tz": "npx tsx tests/run-tz-matrix.ts",
-    "typecheck:storage": "tsc --noEmit -p tsconfig.test.json"
+    "typecheck:storage": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "expo lint"
   },
   "private": true
 }
