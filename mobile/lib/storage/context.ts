@@ -247,11 +247,12 @@ async function decryptTimeSlotRow(
 async function encryptDoseLogRow(
   cipher: CipherPort,
   key: Uint8Array,
-  row: DoseLogRow & { note?: string | null },
+  row: DoseLogRow & { note?: string | null; unitsTaken?: number | null },
 ): Promise<DoseLogRow> {
+  const { note: _note, unitsTaken: _units, ...plain } = row;
   return {
-    ...row,
-    enc_payload: await sealJson(cipher, key, { note: row.note ?? null }),
+    ...plain,
+    enc_payload: await sealJson(cipher, key, { note: row.note ?? null, unitsTaken: row.unitsTaken ?? null }),
   };
 }
 
@@ -259,9 +260,17 @@ async function decryptDoseLogRow(
   cipher: CipherPort,
   key: Uint8Array,
   row: DoseLogRow,
-): Promise<DoseLogRow & { note?: string | null }> {
-  const phi = await openJson<{ note?: string | null }>(cipher, key, row.enc_payload);
-  return { ...row, note: phi.note ?? null };
+): Promise<DoseLogRow & { note?: string | null; unitsTaken: number | null }> {
+  const phi = await openJson<{ note?: string | null; unitsTaken?: unknown }>(cipher, key, row.enc_payload);
+  // Payload is untrusted: only a finite positive number counts. Logs written before
+  // COR-96 have no unitsTaken and fall back to the slot's current dose (see refundUnits).
+  const units = typeof phi.unitsTaken === 'number' && Number.isFinite(phi.unitsTaken) && phi.unitsTaken > 0 ? phi.unitsTaken : null;
+  return { ...row, note: phi.note ?? null, unitsTaken: units };
+}
+
+/** Units to give back when a taken log is undone or changed (COR-96). */
+function refundUnits(storedUnits: number | null | undefined, currentSlotDoseUnits: number | undefined): number {
+  return storedUnits ?? currentSlotDoseUnits ?? 1;
 }
 
 async function encryptPreferenceRow(
@@ -708,10 +717,13 @@ export class MedicationRepository {
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
       const doseUnits = slot?.doseUnits ?? 1;
       const wasTaken = existing?.status === 'taken';
+      const existingUnits = existing ? (await decryptDoseLogRow(this.platform.cipher, key, existing)).unitsTaken : null;
+      // Re-marking a taken dose keeps what was originally deducted.
+      const unitsTaken = willBeTaken ? (wasTaken ? refundUnits(existingUnits, slot?.doseUnits) : doseUnits) : null;
 
       let updatedMedication = medication ?? undefined;
       await this.platform.driver.transaction(async () => {
-        const logRow: DoseLogRow & { note?: string | null } = {
+        const logRow: DoseLogRow & { note?: string | null; unitsTaken?: number | null } = {
           id: doseKey,
           date_key: dateKey,
           medication_id: medicationId,
@@ -722,6 +734,7 @@ export class MedicationRepository {
           updated_at: nowIso(),
           enc_payload: '',
           note: note ?? null,
+          unitsTaken,
         };
         const encrypted = await encryptDoseLogRow(this.platform.cipher, key, logRow);
         await this.platform.driver.run(
@@ -742,7 +755,7 @@ export class MedicationRepository {
         );
 
         if (medication && wasTaken !== willBeTaken) {
-          const delta = willBeTaken ? -doseUnits : doseUnits;
+          const delta = willBeTaken ? -doseUnits : refundUnits(existingUnits, slot?.doseUnits);
           const current = await this.getMedicationRow(medicationId);
           if (current) {
             await this.platform.driver.run(
@@ -780,7 +793,9 @@ export class MedicationRepository {
       const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
       const medication = await this.getMedicationById(medicationId);
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
-      const doseUnits = slot?.doseUnits ?? 1;
+      const storedUnits =
+        existing?.status === 'taken' ? (await decryptDoseLogRow(this.platform.cipher, await this.getKey(), existing)).unitsTaken : null;
+      const doseUnits = refundUnits(storedUnits, slot?.doseUnits);
 
       await this.platform.driver.transaction(async () => {
         await this.platform.driver.run('DELETE FROM dose_logs WHERE id = ?', [doseKey]);

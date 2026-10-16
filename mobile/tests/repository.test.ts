@@ -142,6 +142,61 @@ async function main() {
   assert.strictEqual((await repository.getMedicationById('med-edit'))!.inventory.currentUnits, 3);
   await repository.deleteMedication('med-edit');
 
+  // COR-96: undo / un-take refunds what was actually deducted, not the slot's current dose.
+  const stockOf = async (id: string) => (await repository.getMedicationById(id))!.inventory.currentUnits;
+  const base: Medication = { ...medication, id: 'med-units' }; // slot-a 2 units, slot-b 1 unit, stock 10
+  await repository.saveMedication(base);
+  // Dose edited between take and undo: 10 -> 8, slot-a becomes 3 units, undo -> back to 10 (not 11).
+  await repository.logDose('2026-10-15', 'med-units', 'slot-a', 'taken');
+  assert.strictEqual(await stockOf('med-units'), 8);
+  const edited = (await repository.getMedicationById('med-units'))!;
+  await repository.saveMedication({
+    ...edited,
+    timeSlots: edited.timeSlots.map((slot) => (slot.id === 'slot-a' ? { ...slot, doseUnits: 3 } : slot)),
+  });
+  // Re-marking taken keeps the original deduction.
+  await repository.logDose('2026-10-15', 'med-units', 'slot-a', 'taken');
+  assert.strictEqual(await stockOf('med-units'), 8);
+  await repository.undoDose('2026-10-15', 'med-units', 'slot-a');
+  assert.strictEqual(await stockOf('med-units'), 10);
+  // taken -> skipped refunds the stored amount too (now 3 units deducted).
+  await repository.logDose('2026-10-16', 'med-units', 'slot-a', 'taken');
+  assert.strictEqual(await stockOf('med-units'), 7);
+  const shrunk = (await repository.getMedicationById('med-units'))!;
+  await repository.saveMedication({
+    ...shrunk,
+    timeSlots: shrunk.timeSlots.map((slot) => (slot.id === 'slot-a' ? { ...slot, doseUnits: 1 } : slot)),
+  });
+  await repository.logDose('2026-10-16', 'med-units', 'slot-a', 'skipped');
+  assert.strictEqual(await stockOf('med-units'), 10);
+  // Slot removed between take and undo: add a 3-unit slot, take it, remove it, undo.
+  const withBig = (await repository.getMedicationById('med-units'))!;
+  await repository.saveMedication({
+    ...withBig,
+    timeSlots: [...withBig.timeSlots, { id: 'slot-c', label: 'Bedtime', time: '22:00', doseUnits: 3, reminderEnabled: true }],
+  });
+  await repository.logDose('2026-10-15', 'med-units', 'slot-c', 'taken');
+  assert.strictEqual(await stockOf('med-units'), 7);
+  const removed = (await repository.getMedicationById('med-units'))!;
+  await repository.saveMedication({ ...removed, timeSlots: removed.timeSlots.filter((slot) => slot.id !== 'slot-c') });
+  await repository.undoDose('2026-10-15', 'med-units', 'slot-c');
+  assert.strictEqual(await stockOf('med-units'), 10, 'removed slot refunds the 3 units actually taken');
+  // unitsTaken lives in the encrypted payload, never in a plaintext column.
+  await repository.logDose('2026-10-17', 'med-units', 'slot-b', 'taken');
+  const logRows = await driver.all<Record<string, unknown>>('SELECT * FROM dose_logs WHERE id = ?', ['2026-10-17_med-units_slot-b']);
+  assert.ok(!('units_taken' in logRows[0]) && !JSON.stringify(logRows[0]).includes('unitsTaken'));
+  await repository.undoDose('2026-10-17', 'med-units', 'slot-b');
+  // Legacy logs (no unitsTaken in payload, e.g. pre-COR-96 or seeded via logDoseAt) fall back
+  // to the slot's current dose, or 1 unit if the slot is gone.
+  await repository.logDoseAt('2026-10-18', 'med-units', 'slot-a', 'taken', '08:00'); // no stock change
+  assert.strictEqual(await stockOf('med-units'), 10);
+  await repository.undoDose('2026-10-18', 'med-units', 'slot-a'); // slot-a is now 1 unit
+  assert.strictEqual(await stockOf('med-units'), 11);
+  await repository.logDoseAt('2026-10-18', 'med-units', 'slot-gone', 'taken', '08:00');
+  await repository.logDose('2026-10-18', 'med-units', 'slot-gone', 'skipped');
+  assert.strictEqual(await stockOf('med-units'), 12);
+  await repository.deleteMedication('med-units');
+
   await repository.deleteMedication('med-1');
   assert.strictEqual(await repository.getMedicationById('med-1'), null);
 
