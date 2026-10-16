@@ -80,6 +80,12 @@ async function main() {
   assert.strictEqual(undone.undoneKey, '2026-10-15_med-1_slot-a');
   assert.strictEqual((await repository.getDoseLogsByDate('2026-10-15')).length, 0);
 
+  const stamped = await repository.logDose('2026-10-15', 'med-1', 'slot-a', 'taken', undefined, '07:45');
+  assert.strictEqual(stamped.log.loggedAt, '07:45');
+  assert.strictEqual(stamped.updatedMedication?.inventory.currentUnits, 8);
+  assert.strictEqual((await repository.getDoseLogsByDate('2026-10-15'))[0].loggedAt, '07:45');
+  await repository.undoDose('2026-10-15', 'med-1', 'slot-a');
+
   assert.strictEqual(await repository.getPreference('theme', 'system'), 'system');
   await repository.setPreference('theme', 'dark');
   assert.strictEqual(await repository.getPreference('theme', 'system'), 'dark');
