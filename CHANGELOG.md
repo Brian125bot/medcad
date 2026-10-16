@@ -25,6 +25,23 @@ the issue id and PR number where there are any.
 ## [Unreleased]
 
 ### Added
+- **[mobile]** **Today screen** (COR-74): 7-day date strip with retroactive
+  logging, animated progress ring, current/best streak, doses grouped into
+  Morning / Midday / Evening / Bedtime cards for all four states (pending,
+  missed, taken, skipped), low-supply pills, and empty states (no medications →
+  *Add First Medication*, rest day with next dose, all-done banner). Take / Skip
+  / Undo buttons, swipe right to take (`expo-haptics`), swipe left for a
+  skip-reason sheet, **Take all** for the active block and a 5 s undo snackbar.
+  Changes are optimistic and roll back with a banner if the write fails; taking
+  a dose decrements stock in the same transaction. The Today tab badge now
+  shows doses still pending today. *(COR-74)*
+- **[mobile]** `lib/today` (`today-view-model.ts`, `today-store.ts`) and
+  `hooks/useTodaySchedule.ts`; `tests/today-schedule.spec.ts` (37 tests,
+  160 → 197; `lib/today` joins the 100 % coverage gate). *(COR-74)*
+- **[mobile]** Dependencies `react-native-gesture-handler ~2.32.0` (root
+  `GestureHandlerRootView`) and `expo-haptics ~57.0.3`. *(COR-74)*
+- **[mobile]** `repository.logDose(…, note?, loggedAt?)` takes an optional
+  `HH:mm` time (defaults to now). *(COR-74)*
 - **[mobile]** Bottom tabs **Today**, **Regimen**, **Insights**, **Cabinet** (lucide icons,
   `cadenceTokens` colours). Today, Insights and Cabinet are placeholders for
   COR-74, COR-80 and COR-78. The Today tab's `tabBarBadge` is wired to a count

@@ -28,8 +28,8 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
-| COR-73 | Bottom tab navigation and headers | 3 | Backlog | Blocks COR-74, COR-78, COR-80 |
-| COR-74 | Daily protocol screen with swipe gestures | 5 | Backlog | Urgent. Blocked by COR-71 ✔, COR-72 ✔, **COR-73**; blocks COR-77 |
+| COR-73 | Bottom tab navigation and headers | 3 | **Done** | PR #10 + agreed-design follow-up (header, icons, Theme tab, Regimen) |
+| COR-74 | Daily protocol screen with swipe gestures | 5 | In review | Built: [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-90). Blocks COR-77 |
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | Backlog | **Overlaps PR #8** (merged) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | Backlog | **Blocks every device build** |
@@ -117,7 +117,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 3 | Removing a dose time orphans its `dose_logs` | History, streaks and analytics can reference slots that no longer exist; `deleteMedication` orphans logs the same way | [storage.md](storage.md#behaviours-worth-knowing) | COR-93 |
 | 4 | **Undo restores the slot's current dose** | Stock drifts if a dose is edited (1 → 2: 10 → 9 → **11**) or its slot removed (3-unit take, undo → restores 1) between take and undo. Nothing records what a `taken` log deducted | [storage.md](storage.md#behaviours-worth-knowing) | **Untracked** — fold into COR-93 or file separately; matters from COR-74 onward |
 | 5 | `logDose` doesn't validate ids | An unknown medication id writes an orphan log row without error; an unknown slot id assumes 1 unit | [storage.md](storage.md#behaviours-worth-knowing) | Untracked |
-| 6 | Edit saves a snapshot of `currentUnits` | A dose logged while the editor is open is overwritten on save. Latent until COR-74 adds dose logging | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |
+| 6 | Edit saves a snapshot of `currentUnits` | A dose logged while the editor is open is overwritten on save. Live since COR-74: Today can log a dose while the editor is open | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |
 | 7 | `nextFillDate` / calendar event not recomputed on edit | Stored fill date can be wrong after schedule or stock edits | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-94 |
 | 8 | No notification hook | Saving or deleting a medication schedules nothing. `deleteMedication` doesn't go through `saveMedication`, so a hook must cover both | [architecture.md](architecture.md#5-runtime-flows) | COR-76 |
 | 9 | Migration runner is a single step | There is no per-version logic, and the audit-row text is hard-coded to v1. Adding a v2 needs the ordered-step structure first (not needed for payload-only fields) | [storage.md](storage.md#schema-versions-and-migrations) | Untracked (becomes necessary with the first column change) |

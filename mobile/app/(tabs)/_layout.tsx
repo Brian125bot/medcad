@@ -3,6 +3,7 @@ import { CalendarDays, type LucideIcon, Package, Palette, Pill, TrendingUp } fro
 
 import { TabHeaderActions, TabHeaderTitle } from "@/components/tab-header/TabHeader";
 import { cadenceTokens } from "@/constants/theme";
+import { useTodayPendingCount } from "@/hooks/useTodaySchedule";
 import {
   INITIAL_TAB,
   PRIMARY_TABS,
@@ -22,11 +23,9 @@ const TAB_ICONS: Record<PrimaryTabName, LucideIcon> = {
   cabinet: Package,
 };
 
-// Count of doses due today for the Today badge. No data source yet: COR-74
-// supplies it. While undefined, no badge is shown.
-const dosesDueToday: number | undefined = undefined;
-
 export default function TabLayout() {
+  // Doses still pending today (COR-74); no badge until loaded.
+  const dosesDueToday = useTodayPendingCount();
   return (
     <Tabs
       screenOptions={{

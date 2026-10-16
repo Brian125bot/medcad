@@ -49,7 +49,7 @@ primitives, with identical wire formats). Only three thin adapter files touch
 | --- | --- | --- | --- |
 | `app/_layout.tsx` | Root stack, fonts, splash, `SafeAreaProvider` | no | — |
 | `app/index.tsx` | Redirects `/` to `/today` | no | — |
-| `app/(tabs)/` | Four tabs (COR-73): `today` (placeholder, COR-74), `regimen` (medication list; add via the header), `insights` (placeholder, COR-80), `cabinet` (placeholder, COR-78). `two` (Theme — typography reference from the COR-70 scaffold) is a tab in dev builds only (`href: themeTabHref(__DEV__)`; the screen also redirects to Today outside dev) | no | — |
+| `app/(tabs)/` | Four tabs (COR-73): `today` (daily doses, COR-74 — see [today-screen.md](today-screen.md)), `regimen` (medication list; add via the header), `insights` (placeholder, COR-80), `cabinet` (placeholder, COR-78). `two` (Theme — typography reference from the COR-70 scaffold) is a tab in dev builds only (`href: themeTabHref(__DEV__)`; the screen also redirects to Today outside dev) | no | — |
 | `components/tab-header/` | Shared tab header: locale date with the "Local only" sync pill beside it, "+ Add" action on the right (no tab-name title); set once in the tabs layout's `screenOptions` | no | — |
 | `lib/navigation/` | Tab set (`PRIMARY_TABS`), `toTabBadge`, `themeTabHref`, header date formatting, `SYNC_STATUS_LABEL` | **yes** | `navigation.spec.ts` |
 | `app/medication/new.tsx`, `[id].tsx` | Add / edit modal screens; load + save via the repository | no | — |
@@ -165,13 +165,14 @@ Conventions that matter everywhere:
 each slot row, **delete slot rows no longer present**. It does **not** touch
 `dose_logs` (see [known gaps](roadmap.md#known-gaps-and-sharp-edges)).
 
-### Log a dose *(repository only — no screen calls it yet)*
+### Log a dose
 
-`repository.logDose(dateKey, medicationId, slotId, status)` runs under the
+`repository.logDose(dateKey, medicationId, slotId, status, note?, loggedAt?)` runs under the
 single-writer gate: upsert the log row, and when the `taken` state flips,
 adjust `inventory_current` by the slot's `doseUnits` in the same transaction.
 `undoDose` deletes the log and returns units if it had been `taken`. The Today
-screen (COR-74) is the first intended caller.
+screen calls both through `TodayStore`, optimistically with rollback
+([today-screen.md](today-screen.md#actions)).
 
 ## 6. Cross-cutting invariants
 

@@ -7,7 +7,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['lib/schedule/**/*.ts', 'lib/wizard/**/*.ts'],
+      include: ['lib/schedule/**/*.ts', 'lib/wizard/**/*.ts', 'lib/today/**/*.ts'],
       thresholds: {
         lines: 100,
         branches: 100,
