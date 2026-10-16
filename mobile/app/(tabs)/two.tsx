@@ -5,8 +5,8 @@ import { Info } from "lucide-react-native";
 /**
  * Theme reference screen (COR-70 scaffold).
  * Shows the NativeWind typography scale and confirms safe-area wiring.
- * Hidden from the tab bar (COR-73) and reachable at `/two` in development
- * builds only; production builds redirect to Today.
+ * A tab in development builds only (COR-73, `themeTabHref`); production
+ * builds hide the tab and this screen redirects to Today.
  */
 export default function ThemeScreen() {
   if (!__DEV__) return <Redirect href="/today" />;
