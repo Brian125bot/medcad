@@ -197,6 +197,58 @@ async function main() {
   assert.strictEqual(await stockOf('med-units'), 12);
   await repository.deleteMedication('med-units');
 
+  // COR-88: importSnapshot writes everything in one transaction; getDoseLogsInRange is inclusive.
+  {
+    const snapMed: Medication = { ...medication, id: 'snap-med', name: 'Snapshot Med' };
+    const snapLogs = [
+      { key: '2026-09-30_snap-med_slot-a', dateKey: '2026-09-30', medicationId: 'snap-med', slotId: 'slot-a', status: 'taken' as const, loggedAt: '08:01' },
+      { key: '2026-10-01_snap-med_slot-a', dateKey: '2026-10-01', medicationId: 'snap-med', slotId: 'slot-a', status: 'skipped' as const, loggedAt: '08:02', note: 'away' },
+      { key: '2026-10-05_snap-med_slot-b', dateKey: '2026-10-05', medicationId: 'snap-med', slotId: 'slot-b', status: 'missed' as const, loggedAt: '18:00' },
+      { key: '2026-10-10_snap-med_slot-a', dateKey: '2026-10-10', medicationId: 'snap-med', slotId: 'slot-a', status: 'taken' as const, loggedAt: '08:03' },
+    ];
+    await repository.importSnapshot([snapMed], snapLogs);
+    const storedSnap = (await repository.getMedicationById('snap-med'))!;
+    assert.strictEqual(storedSnap.name, 'Snapshot Med');
+    assert.strictEqual(storedSnap.timeSlots.length, 2);
+    assert.strictEqual(storedSnap.inventory.currentUnits, 10, 'historical import never touches stock');
+
+    // Earlier blocks leave orphaned logs on other dates/medications (gap 3), so filter to this medication.
+    const snapOnly = async (start: string, end: string) =>
+      (await repository.getDoseLogsInRange(start, end)).filter((log) => log.medicationId === 'snap-med');
+    const inRange = await snapOnly('2026-10-01', '2026-10-05');
+    assert.deepStrictEqual(inRange.map((log) => log.dateKey), ['2026-10-01', '2026-10-05']);
+    assert.strictEqual(inRange[0].note, 'away');
+    assert.strictEqual(inRange[0].status, 'skipped');
+    assert.strictEqual(inRange[1].note, undefined);
+    assert.strictEqual((await snapOnly('2026-10-11', '2026-10-20')).length, 0);
+    assert.strictEqual((await snapOnly('2026-09-01', '2026-12-31')).length, 4);
+    assert.strictEqual((await repository.getDoseLogsInRange('2026-10-10', '2026-10-10')).filter((log) => log.medicationId === 'snap-med').length, 1, 'bounds are inclusive');
+    const rawSnap = await driver.all<Record<string, unknown>>("SELECT * FROM dose_logs WHERE medication_id = 'snap-med'");
+    assert.ok(!JSON.stringify(rawSnap).includes('away'), 'imported notes stay encrypted');
+
+    // Imported taken logs record unitsTaken: undo refunds the slot-a dose (2) even after the slot changes.
+    await repository.saveMedication({
+      ...storedSnap,
+      timeSlots: storedSnap.timeSlots.map((slot) => (slot.id === 'slot-a' ? { ...slot, doseUnits: 5 } : slot)),
+    });
+    await repository.undoDose('2026-10-10', 'snap-med', 'slot-a');
+    assert.strictEqual((await repository.getMedicationById('snap-med'))!.inventory.currentUnits, 12);
+
+    // All-or-nothing: a failure before COMMIT leaves no medication and no logs behind.
+    const before = (await driver.all('SELECT id FROM dose_logs')).length;
+    await assert.rejects(
+      repository.importSnapshot(
+        [{ ...medication, id: 'snap-rollback' }],
+        [{ ...snapLogs[0], key: 'x', medicationId: 'snap-rollback' }],
+        { beforeCommit: () => { throw new Error('injected'); } },
+      ),
+      /injected/,
+    );
+    assert.strictEqual(await repository.getMedicationById('snap-rollback'), null);
+    assert.strictEqual((await driver.all('SELECT id FROM dose_logs')).length, before);
+    await repository.deleteMedication('snap-med');
+  }
+
   await repository.deleteMedication('med-1');
   assert.strictEqual(await repository.getMedicationById('med-1'), null);
 

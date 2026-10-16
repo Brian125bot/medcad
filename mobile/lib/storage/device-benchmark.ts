@@ -566,57 +566,60 @@ function orUnknown(value: string | null | undefined): string {
   return value === null || value === undefined || value === '' ? 'unknown' : value;
 }
 
-function passFail(passed: boolean): string {
-  return passed ? 'PASS' : 'FAIL';
+function checkbox(passed: boolean): string {
+  return passed ? '[x]' : '[ ]';
 }
 
-/** Markdown summary for pasting into COR-88 (cold + avg-warm columns). */
+/** Row labels of Brian's COR-88 template, in order. */
+export const TEMPLATE_OPERATIONS: Record<ScenarioId, string> = {
+  A: 'SecureStore Key Unlock & DB Open',
+  B: 'Batch Insert (500 Dose Logs)',
+  C: '365-Day Query & Hydration',
+  D: 'Single Dose Update + Streak Calc',
+};
+
+/** Markdown in Brian's COR-88 template (sections kept verbatim). */
 export function reportToMarkdown(report: DeviceBenchmarkReport): string {
   const t = report.telemetry;
-  const physical = t.isPhysicalDevice === null ? 'unknown' : t.isPhysicalDevice ? 'yes' : 'no (simulator/emulator — not valid COR-88 evidence)';
+  const device = t.manufacturer ? `${t.manufacturer} ${orUnknown(t.deviceModel)}` : orUnknown(t.deviceModel);
+  const physical =
+    t.isPhysicalDevice === null ? ' (physical device: unknown)' : t.isPhysicalDevice ? '' : ' (simulator/emulator — not valid COR-88 evidence)';
+  const i = report.integrity;
   const lines = [
-    `## COR-88 device storage benchmark — ${orUnknown(t.deviceModel)}`,
+    '### COR-88 Physical Device Benchmark Report',
     '',
-    '| Field | Value |',
-    '| --- | --- |',
-    `| Device | ${orUnknown(t.manufacturer ? `${t.manufacturer} ${orUnknown(t.deviceModel)}` : t.deviceModel)} |`,
-    `| Physical device | ${physical} |`,
-    `| OS | ${orUnknown(t.osName)} ${orUnknown(t.osVersion)} (${t.platform}) |`,
-    `| Architecture | ${orUnknown(t.architecture)} |`,
-    `| Encryption | ${report.encryption.cipher} field encryption (${report.encryption.cipherProvider}); key in ${report.encryption.keyStorage}; canary-verified. DB file not encrypted (not SQLCipher) |`,
-    `| App version | ${orUnknown(t.appVersion)} |`,
-    `| Dataset | ${report.dataset.medications} medications, ${report.dataset.doseLogs} dose logs, ${report.dataset.rangeDays}-day range |`,
-    `| Runs | 1 cold + ${report.warmRuns} warm |`,
-    `| Generated | ${report.generatedAt} |`,
+    '#### 1. Hardware & Environment',
     '',
-    '### Latency (ms)',
+    `- **Device Model:** ${device}${physical}`,
+    `- **OS Version:** ${orUnknown(t.osName)} ${orUnknown(t.osVersion)} (${t.platform})`,
+    `- **Chipset / Arch:** ${orUnknown(t.architecture)}`,
+    `- **Storage Layer:** expo-sqlite with app-level ${report.encryption.cipher} field encryption (${report.encryption.cipherProvider}); key in SecureStore (iOS Keychain / Android Keystore), canary-verified. The database file itself is not encrypted (not SQLCipher).`,
     '',
-    '| Scenario | Gate (PASS < / FAIL >) | Cold | Avg Warm | Judged on | Result |',
-    '| --- | --- | --- | --- | --- | --- |',
+    '#### 2. Benchmark Telemetry Results',
+    '',
+    '| Operation | Measured Latency (Cold) | Measured Latency (Avg Warm) | Target Threshold | Status |',
+    '| --- | --- | --- | --- | --- |',
     ...report.scenarios.map(
       (s) =>
-        `| ${s.id}. ${s.name} | < ${s.gate.passBelowMs} / > ${s.gate.failAboveMs} | ${s.coldMs.toFixed(2)} | ${s.avgWarmMs.toFixed(2)} | ${s.gatedOn === 'cold' ? 'Cold' : 'Avg Warm'} | **${s.status}** |`,
+        `| ${TEMPLATE_OPERATIONS[s.id]} | ${s.coldMs.toFixed(2)} ms | ${s.avgWarmMs.toFixed(2)} ms | <${s.gate.passBelowMs} ms | ${s.status} |`,
     ),
     '',
-    `### COR-71 \`runBenchmark()\` (n=${report.legacy.runs})`,
+    `Runs: 1 cold + ${report.warmRuns} warm; dataset ${report.dataset.medications} medications / ${report.dataset.doseLogs} dose logs / ${report.dataset.rangeDays} days. ` +
+      `Status: PASS below the target, FAIL above ${report.scenarios.map((s) => `${s.gate.failAboveMs}`).join(' / ')} ms (A–D), WARN in between; ` +
+      'the first row is judged on Cold, the others on Avg Warm. ' +
+      `COR-71 \`runBenchmark()\` single encrypted write p50/p95: ${report.legacy.writeP50Ms.toFixed(2)} / ${report.legacy.writeP95Ms.toFixed(2)} ms ` +
+      `(<${report.legacy.writeTargetMs} ms target ${report.legacy.writeTargetMet ? 'met' : 'not met'}). Generated ${report.generatedAt}, app ${orUnknown(t.appVersion)}.`,
     '',
-    '| Metric | Value |',
-    '| --- | --- |',
-    `| Single encrypted write p50 / p95 | ${report.legacy.writeP50Ms.toFixed(2)} / ${report.legacy.writeP95Ms.toFixed(2)} ms |`,
-    `| Indexed read p50 | ${report.legacy.readP50Ms.toFixed(2)} ms |`,
-    `| 5-row batch p50 | ${report.legacy.batchP50Ms.toFixed(2)} ms |`,
-    `| < ${report.legacy.writeTargetMs} ms write target (p95) | **${report.legacy.writeTargetMet ? 'MET' : 'NOT MET'}** |`,
+    '#### 3. Cryptographic & Data Integrity Verification',
     '',
-    '### Integrity',
+    `- ${checkbox(i.plaintextScan.passed)} Zero plaintext exposure verified in local application sandbox files (every raw row of the ${i.plaintextScan.tablesScanned} data tables in the benchmark SQLite database scanned: ${i.plaintextScan.rowsScanned} rows, ${i.plaintextScan.leakCount} hits)`,
+    `- ${checkbox(i.wrongKeyRejected.passed)} Sensitive fields in the SQLite database unreadable without the SecureStore encryption key (a wrong key is rejected by the canary and reads are refused). Note: COR-71 encrypts the sensitive fields, not the whole file; structural columns (ids, dates, status, times, stock counts) are plaintext by design.`,
+    `- ${checkbox(i.atomicRollback.passed)} Atomic transactions properly roll back without corrupted records on simulated write failure`,
     '',
-    '| Check | Result |',
-    '| --- | --- |',
-    `| No plaintext sensitive values in raw rows (${report.integrity.plaintextScan.rowsScanned} rows, ${report.integrity.plaintextScan.tablesScanned} tables) | ${passFail(report.integrity.plaintextScan.passed)} |`,
-    `| Wrong key rejected by canary; reads refused | ${passFail(report.integrity.wrongKeyRejected.passed)} |`,
-    `| Injected failure rolls back the whole transaction | ${passFail(report.integrity.atomicRollback.passed)} |`,
-    `| Seeded data, range query and dose update verified | ${passFail(report.integrity.dataVerified.passed)} |`,
+    '#### 4. Milestone Sign-Off',
     '',
-    `**Overall: ${report.overall}**`,
+    `- Automated result for this run: **${report.overall}**${i.dataVerified.passed ? '' : ' (seeded-data verification failed)'}.`,
+    '- [ ] M1 sign-off: **pending Brian\'s review.** This report does not by itself mark M1 or COR-88 complete.',
     '',
   ];
   return lines.join('\n');

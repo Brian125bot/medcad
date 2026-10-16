@@ -261,14 +261,31 @@ describe('buildReport and Markdown', () => {
     expect(report.legacy.writeTargetMet).toBe(false);
 
     const md = reportToMarkdown(report);
-    expect(md).toContain('## COR-88 device storage benchmark — iPhone 15');
-    expect(md).toContain('| Device | Apple iPhone 15 |');
-    expect(md).toContain('| Physical device | yes |');
-    expect(md).toContain('| A. Cold init (SecureStore key + open DB + canary verify) | < 100 / > 250 | 150.00 | 10.00 | Cold | **WARN** |');
-    expect(md).toContain('| Scenario | Gate (PASS < / FAIL >) | Cold | Avg Warm | Judged on | Result |');
-    expect(md).toContain('**NOT MET**');
-    expect(md).toContain('not SQLCipher');
-    expect(md).toContain('**Overall: WARN**');
+    const headings = md.split('\n').filter((line) => line.startsWith('#'));
+    expect(headings).toEqual([
+      '### COR-88 Physical Device Benchmark Report',
+      '#### 1. Hardware & Environment',
+      '#### 2. Benchmark Telemetry Results',
+      '#### 3. Cryptographic & Data Integrity Verification',
+      '#### 4. Milestone Sign-Off',
+    ]);
+    expect(md).toContain('- **Device Model:** Apple iPhone 15\n');
+    expect(md).toContain('- **OS Version:** iOS 19.0 (ios)');
+    expect(md).toContain('- **Chipset / Arch:** arm64');
+    expect(md).toMatch(/- \*\*Storage Layer:\*\* .*app-level AES-256-GCM.*key in SecureStore/);
+    expect(md).toContain('| Operation | Measured Latency (Cold) | Measured Latency (Avg Warm) | Target Threshold | Status |');
+    expect(md).toContain('| SecureStore Key Unlock & DB Open | 150.00 ms | 10.00 ms | <100 ms | WARN |');
+    expect(md).toContain('| Batch Insert (500 Dose Logs) | 400.00 ms | 120.00 ms | <120 ms | WARN |');
+    expect(md).toContain('| 365-Day Query & Hydration |');
+    expect(md).toContain('| Single Dose Update + Streak Calc |');
+    expect(md).toContain('target not met');
+    expect(md).toContain('- [x] Zero plaintext exposure verified in local application sandbox files');
+    expect(md).toContain('- [x] Sensitive fields in the SQLite database unreadable without the SecureStore encryption key');
+    expect(md).toContain('COR-71 encrypts the sensitive fields, not the whole file');
+    expect(md).toContain('- [x] Atomic transactions properly roll back without corrupted records on simulated write failure');
+    expect(md).toContain("pending Brian's review");
+    expect(md).not.toMatch(/100 ?%/);
+    expect(md).toContain('Automated result for this run: **WARN**.');
   });
 
   it('falls back to cold with no warm runs and fails on any integrity failure', () => {
@@ -282,18 +299,35 @@ describe('buildReport and Markdown', () => {
     expect(report.legacy.writeTargetMet).toBe(true);
     expect(report.overall).toBe('FAIL');
     const md = reportToMarkdown(report);
-    expect(md).toContain('— unknown');
-    expect(md).toContain('| Physical device | unknown |');
-    expect(md).toContain('| OS | unknown unknown (android) |');
-    expect(md).toContain('| App version | unknown |');
-    expect(md).toContain('**MET**');
-    expect(md).toMatch(/No plaintext sensitive values.*\| FAIL \|/);
+    expect(md).toContain('- **Device Model:** unknown (physical device: unknown)');
+    expect(md).toContain('- **OS Version:** unknown unknown (android)');
+    expect(md).toContain('- **Chipset / Arch:** unknown');
+    expect(md).toContain('app unknown');
+    expect(md).toContain('target met');
+    expect(md).toContain('- [ ] Zero plaintext exposure');
+    expect(md).toContain('- [x] Sensitive fields');
+    expect(md).toContain('**FAIL**.');
 
     const sim = reportToMarkdown(
       buildReport({ ...telemetry, isPhysicalDevice: false, manufacturer: undefined }, [run('cold', [1, 1, 1, 1])], okIntegrity, new Date()),
     );
-    expect(sim).toContain('no (simulator/emulator — not valid COR-88 evidence)');
-    expect(sim).toContain('| Device | iPhone 15 |');
+    expect(sim).toContain('- **Device Model:** iPhone 15 (simulator/emulator — not valid COR-88 evidence)');
+    const broken = reportToMarkdown(
+      buildReport(
+        telemetry,
+        [run('cold', [1, 1, 1, 1])],
+        {
+          ...okIntegrity,
+          wrongKeyRejected: { passed: false, canaryRejected: false, readsRefused: true },
+          atomicRollback: { passed: false, rowsBefore: 1, rowsAfter: 2 },
+          dataVerified: { ...okIntegrity.dataVerified, passed: false },
+        },
+        new Date(),
+      ),
+    );
+    expect(broken).toContain('- [ ] Sensitive fields');
+    expect(broken).toContain('- [ ] Atomic transactions');
+    expect(broken).toContain('(seeded-data verification failed)');
   });
 
   it('judges B–D on cold when there are no warm runs', () => {
