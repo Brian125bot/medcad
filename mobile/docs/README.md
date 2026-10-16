@@ -18,6 +18,7 @@ verified — usually anything that needs a device — the page says so.
 | [roadmap.md](roadmap.md) | You're choosing what to work on, or you hit something odd and want to know whether it's a known gap. Milestones, Linear status, and the **Known gaps and sharp edges** table. |
 | [storage.md](storage.md) | You touch persistence: the encrypted-column model, key lifecycle, migrations, and a table of verified behaviours (clamping, orphaned logs, undo drift). |
 | [schedule-engine.md](schedule-engine.md) | You touch "is it due / adherence / streak / supply" logic. The rules, the intentional differences from the web app, and how it's tested. |
+| [today-screen.md](today-screen.md) | You touch the Today tab: view model, optimistic store, rollback, gestures, rollover. |
 | [medication-wizard.md](medication-wizard.md) | You touch the add / edit flow: every field rule, form ⇄ `Medication` mapping, and a checklist for adding a field. |
 | [cor-71-plan.md](cor-71-plan.md) | History only. The original storage plan; the as-built layout differs (see its banner). |
 
@@ -52,6 +53,7 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test   # th
 | `Medication` / a stored field | [medication-wizard.md](medication-wizard.md#adding-a-field-to-a-medication) checklist; [storage.md](storage.md) table if it's persisted |
 | `lib/storage/` (schema, migrations, repository behaviour) | [storage.md](storage.md), and [roadmap.md](roadmap.md#known-gaps-and-sharp-edges) if you fix or add a sharp edge |
 | `lib/schedule/` rules | [schedule-engine.md](schedule-engine.md) |
+| `lib/today/`, Today UI | [today-screen.md](today-screen.md) |
 | Wizard fields, limits, messages | [medication-wizard.md](medication-wizard.md) |
 | Commands, tooling, test layout | [development.md](development.md) |
 | Folder structure or layering | [architecture.md](architecture.md) |

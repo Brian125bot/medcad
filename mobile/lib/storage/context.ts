@@ -668,10 +668,13 @@ export class MedicationRepository {
     slotId: string,
     status: 'taken' | 'skipped' | 'missed',
     note?: string,
+    /** `HH:mm` to record; defaults to the current local time. */
+    loggedAt?: string,
   ) {
     const { buildDoseKey } = await import('../domain/medication-data');
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
     const willBeTaken = status === 'taken';
+    const stamp = loggedAt ?? hhMm();
 
     // Single-writer gate: read-modify-write must not interleave (double-tap safety).
     return this.platform.driver.runExclusive(async () => {
@@ -691,7 +694,7 @@ export class MedicationRepository {
           medication_id: medicationId,
           slot_id: slotId,
           status,
-          logged_at: hhMm(),
+          logged_at: stamp,
           created_at: existing?.created_at || nowIso(),
           updated_at: nowIso(),
           enc_payload: '',
@@ -738,7 +741,7 @@ export class MedicationRepository {
         medicationId,
         slotId,
         status,
-        loggedAt: hhMm(),
+        loggedAt: stamp,
         note,
       };
       return { log, updatedMedication };
