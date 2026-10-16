@@ -25,6 +25,16 @@ the issue id and PR number where there are any.
 ## [Unreleased]
 
 ### Added
+- **[mobile]** Bottom tabs **Today**, **Regimen**, **Insights**, **Cabinet** (lucide icons,
+  `cadenceTokens` colours). Today, Insights and Cabinet are placeholders for
+  COR-74, COR-80 and COR-78. The Today tab's `tabBarBadge` is wired to a count
+  that has no source yet, so no badge shows until COR-74. *(COR-73)*
+- **[mobile]** Shared tab header: screen title with the date in the device
+  locale (e.g. "Fri, Oct 16"), a static **"Local only"** sync pill (cloud sync,
+  COR-84, doesn't exist yet) and a **"+ Add"** action that opens the add
+  medication modal. *(COR-73)*
+- **[mobile]** `lib/navigation` (tab set, `toTabBadge`, `formatHeaderDate`) with
+  `tests/navigation.spec.ts`; 145 → 158 tests. *(COR-73)*
 - **[mobile]** `Medication.appearance` — the pill shape and colours chosen in the
   wizard are now **saved**. They live inside the encrypted medication payload, so
   no schema migration is needed; medications saved before this load with no
@@ -42,6 +52,11 @@ the issue id and PR number where there are any.
   *(PR #8)*
 
 ### Changed
+- **[mobile]** The medication list moved from the **Medications** tab
+  (`app/(tabs)/medications.tsx`) to the **Regimen** tab (`app/(tabs)/regimen.tsx`,
+  route `/regimen`), unchanged. `/` now redirects to `/today`. *(COR-73)*
+- **[mobile]** The scaffold **Theme** screen (`/two`) is hidden from the tab bar
+  and only renders in development builds. *(COR-73)*
 - **[mobile]** `PillShape` / `PillAppearance` moved from `lib/wizard` into
   `lib/domain/medication-data.ts` (re-exported from the wizard module, so
   existing imports still work). *(PR #8)*

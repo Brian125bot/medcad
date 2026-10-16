@@ -86,7 +86,7 @@ and on the device, only the three ports differ.
 
 What is **not** covered:
 
-- React components and screens (`MedicationWizard`, the picker, the list) —
+- React components and screens (`MedicationWizard`, the picker, the list, the tab bar and header) —
   only manual testing, and none on a real device yet (COR-91).
 - `lib/storage/expo-*.ts` — device-only by nature (COR-88).
 - Coverage thresholds apply to `lib/schedule` and `lib/wizard` only, not to
@@ -111,6 +111,7 @@ the seed data deliberately uses anonymous IDs (`seed-med-N`).
 | A new domain type | `lib/domain/medication-data.ts` | Optional fields; see [medication-wizard.md](medication-wizard.md#adding-a-field-to-a-medication) |
 | A colour / spacing token | `constants/theme.ts` **and** `tailwind.config.js` | `ink` and `muted` exist only in `theme.ts` today |
 | Navigation | `expo-router` (`Link`, `router`, `useLocalSearchParams`) | |
+| A tab, or a change to the tab header | Tab set in `lib/navigation/tabs.ts` (`PRIMARY_TABS`) + a file in `app/(tabs)/`; icon in `app/(tabs)/_layout.tsx`; header in `components/tab-header/` | Four tabs; the header is set once in `screenOptions`, never per screen |
 
 ## Conventions observed in this repo
 

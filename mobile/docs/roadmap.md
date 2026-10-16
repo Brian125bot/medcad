@@ -125,7 +125,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 11 | No CI | `.github/` has never existed; the local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
 | 12 | `mobile/` isn't self-contained | Two parity specs import the web module at the repo root, so they fail if `mobile/` is checked out alone | [architecture.md](architecture.md#8-relationship-to-the-web-prototype) | Untracked |
 | 13 | Legacy duplication in the domain module | Web-parity copies of schedule helpers (and duplicate `buildDoseKey` / `toDateKey`) sit beside the hardened `lib/schedule` versions | [architecture.md](architecture.md#7-legacy-duplication) | Untracked |
-| 14 | Scaffold leftovers | Tabs are Home / Medications / Theme; `app/modal.tsx`, `EditScreenInfo` and the Themed components are template code. COR-73 replaces the tab structure | [architecture.md](architecture.md#2-module-map) | COR-73 |
+| 14 | Scaffold leftovers | `app/modal.tsx`, `EditScreenInfo`, the Themed components and the dev-only Theme screen (`app/(tabs)/two.tsx`) are template code. The scaffold tabs were replaced in COR-73 | [architecture.md](architecture.md#2-module-map) | Untracked |
 | 15 | `app.json` has no `ios.bundleIdentifier` / `android.package` | EAS builds and store submission need them | `mobile/app.json` | Untracked (release work, COR-87) |
 | 16 | No component tests; coverage gate covers only `lib/schedule` and `lib/wizard` | UI regressions are caught only by hand. Storage has tests but no coverage threshold | [development.md](development.md#testing) | Untracked |
 

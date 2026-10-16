@@ -5,8 +5,8 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import type { Medication } from "@/lib/domain/medication-data";
 import { getStorageContext } from "@/lib/storage";
 
-/** Minimal medication list: entry point for the COR-75 add / edit wizard. */
-export default function MedicationsScreen() {
+/** Regimen tab: medication list, entry point for the COR-75 add / edit wizard. */
+export default function RegimenScreen() {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [failed, setFailed] = useState(false);
 
