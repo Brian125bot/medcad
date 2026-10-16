@@ -14,7 +14,7 @@ verified — usually anything that needs a device — the page says so.
 | Doc | Read it when… |
 | --- | --- |
 | [architecture.md](architecture.md) | You're new. Layers, module map, dependency rules, data model, the flows for add / edit / log, and the invariants (never log PHI, no silent key rotation). |
-| [development.md](development.md) | You need to set up, run, test or lint; you want to know where new code goes, or why the app won't start right now. |
+| [development.md](development.md) | You need to set up, run, test or lint; you want to know where new code goes. |
 | [roadmap.md](roadmap.md) | You're choosing what to work on, or you hit something odd and want to know whether it's a known gap. Milestones, Linear status, and the **Known gaps and sharp edges** table. |
 | [storage.md](storage.md) | You touch persistence: the encrypted-column model, key lifecycle, migrations, and a table of verified behaviours (clamping, orphaned logs, undo drift). |
 | [schedule-engine.md](schedule-engine.md) | You touch "is it due / adherence / streak / supply" logic. The rules, the intentional differences from the web app, and how it's tested. |
@@ -42,8 +42,8 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test   # th
 - **Dates are strings.** A day is a local `YYYY-MM-DD` key, never an instant;
   there is no hidden clock — callers pass `todayKey`.
 - **There is no CI.** The local gate above is the only check.
-- **The app does not currently bundle** (missing font, COR-90). Tests, typecheck
-  and lint still work.
+- **Device QA is still pending** (COR-88, COR-91). Bundling works after COR-90;
+  tests, typecheck and lint are the local gate until CI exists.
 
 ## When you change X, update Y
 

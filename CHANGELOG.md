@@ -24,6 +24,12 @@ the issue id and PR number where there are any.
 
 ## [Unreleased]
 
+### Fixed
+- **[mobile]** Restored `assets/fonts/SpaceMono-Regular.ttf` (Space Mono, OFL)
+  so `useFonts` in `app/_layout.tsx` resolves and native / web exports bundle
+  again; Metro registers `.wasm` assets for `expo-sqlite` on web export.
+  *(COR-90)*
+
 ### Added
 - **[mobile]** **Today screen** (COR-74): 7-day date strip with retroactive
   logging, animated progress ring, current/best streak, doses grouped into

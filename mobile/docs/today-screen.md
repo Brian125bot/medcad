@@ -65,5 +65,5 @@ skip. Failures (e.g. web) are ignored.
   swipe-left sheet only skips, with an optional reason saved as the log note.
 - Undo of a take refunds the slot's *current* dose units
   ([roadmap gap 4](roadmap.md#known-gaps-and-sharp-edges)).
-- Not run on a device: the app doesn't bundle (COR-90). Gestures, haptics and
+- Not run on a device yet (COR-91). Gestures, haptics and
   the ring animation are type-checked only.

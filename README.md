@@ -34,9 +34,8 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test
   keystore), a pure schedule / streak / supply engine, and the add / edit
   medication wizard.
 - **Not built yet:** the Today screen, Insights, Cabinet, notifications, sync.
-- **Heads-up:** the app **does not currently bundle** — a font file referenced
-  in `app/_layout.tsx` was never committed (Linear COR-90). Tests, typecheck and
-  lint are unaffected. Nothing has been run on a real device yet.
+- **Heads-up:** nothing has been run on a real device yet (COR-88, COR-91).
+  Bundling was restored in COR-90 (`SpaceMono-Regular.ttf` in `mobile/assets/fonts/`).
 - **There is no CI.** The command above is the only gate.
 
 ## Web prototype

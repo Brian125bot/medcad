@@ -29,11 +29,11 @@ Points are Linear estimates. "Done" means closed in Linear.
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
 | COR-73 | Bottom tab navigation and headers | 3 | Backlog | Blocks COR-74, COR-78, COR-80 |
-| COR-74 | Daily protocol screen with swipe gestures | 5 | In review | Built: [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-90). Blocks COR-77 |
+| COR-74 | Daily protocol screen with swipe gestures | 5 | In review | Built: [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-91). Blocks COR-77 |
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | Backlog | **Overlaps PR #8** (merged) — see below |
-| COR-90 | Restore the missing SpaceMono font | 1 | Backlog | **Blocks every device build** |
-| COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Blocked by COR-90 |
+| COR-90 | Restore the missing SpaceMono font | 1 | **Done** | `SpaceMono-Regular.ttf` + OFL in `assets/fonts/` |
+| COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Unblocked by COR-90 |
 | COR-93 | Handle `dose_logs` for slots removed in edit | 2 | Backlog | Also fixes the undo drift below |
 
 ### M3 — Background notifications and alarms
@@ -95,8 +95,8 @@ that are not recorded here.
 
 ## Suggested order (from the dependency graph)
 
-1. **COR-90** first — a one-point fix that unblocks any device work (COR-91,
-   COR-88's on-device run, and every later screen).
+1. **COR-91 / COR-88 on-device** — COR-90 unblocked bundling; run storage and
+   wizard QA on iOS/Android next.
 2. **COR-73 → COR-74** — tabs unblock Today, Insights and Cabinet; Today is the
    first real caller of `logDose` / `undoDose`.
 3. **COR-93 alongside COR-74** — Today must not show phantom doses for removed
@@ -112,8 +112,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 
 | # | Gap | Effect | Where to read more | Linear |
 | --- | --- | --- | --- | --- |
-| 1 | `assets/fonts/SpaceMono-Regular.ttf` is missing | `expo start`, `expo export` and EAS builds fail ("Unable to resolve …"). Tests, typecheck and lint are unaffected | [development.md](development.md#known-blockers) | COR-90 |
-| 2 | Nothing has run on a device | The `< 15 ms` write benchmark and the encrypted-at-rest claim are proven only under Node; wizard UI, pickers and modals are unverified on iOS/Android | [storage.md](storage.md#latency-benchmark-local-developer-machine--not-ci-not-device) | COR-88, COR-91 |
+| 1 | Nothing has run on a device | The `< 15 ms` write benchmark and the encrypted-at-rest claim are proven only under Node; wizard UI, pickers and modals are unverified on iOS/Android | [storage.md](storage.md#latency-benchmark-local-developer-machine--not-ci-not-device) | COR-88, COR-91 |
 | 3 | Removing a dose time orphans its `dose_logs` | History, streaks and analytics can reference slots that no longer exist; `deleteMedication` orphans logs the same way | [storage.md](storage.md#behaviours-worth-knowing) | COR-93 |
 | 4 | **Undo restores the slot's current dose** | Stock drifts if a dose is edited (1 → 2: 10 → 9 → **11**) or its slot removed (3-unit take, undo → restores 1) between take and undo. Nothing records what a `taken` log deducted | [storage.md](storage.md#behaviours-worth-knowing) | **Untracked** — fold into COR-93 or file separately; matters from COR-74 onward |
 | 5 | `logDose` doesn't validate ids | An unknown medication id writes an orphan log row without error; an unknown slot id assumes 1 unit | [storage.md](storage.md#behaviours-worth-knowing) | Untracked |

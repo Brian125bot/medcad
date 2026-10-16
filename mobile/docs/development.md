@@ -4,14 +4,6 @@ Everything you need to set up, run, test and change `mobile/`. Commands below
 were run for this guide on 2026-10-16 (Node 22.22.0, Linux) unless marked
 otherwise.
 
-> **Read this first:** as of this writing the app **does not bundle**.
-> `app/_layout.tsx` requires `assets/fonts/SpaceMono-Regular.ttf`, which was
-> never committed, so `expo start` / `expo export` fail with *Unable to resolve
-> "../assets/fonts/SpaceMono-Regular.ttf"* (verified with
-> `npx expo export --platform web`). Tracked as Linear **COR-90**. Everything
-> that doesn't bundle the app — tests, typecheck, lint — works fine. See
-> [Known blockers](#known-blockers).
-
 ## Setup
 
 ```bash
@@ -43,7 +35,8 @@ npm ci            # use the lockfile (package-lock.json); there is no bun.lock h
 | `npm run typecheck:storage` | Typecheck the Node test project (`tsconfig.test.json`: `lib/**` and `tests/**`, minus the `expo-*` adapters) | must be clean |
 | `npm run lint` | `expo lint` → ESLint 9 with `eslint-config-expo` (`eslint.config.js`) | exits 0 on a clean tree, non-zero on errors; existing warnings are tolerated |
 | `npx expo-doctor` | Dependency / config health check | needs internet: offline, 2 of 21 checks fail on network access only |
-| `npx expo start` (`npm start`) | Dev server; `i` / `a` / `w` for iOS / Android / web | blocked by [COR-90](#known-blockers) |
+| `npx expo start` (`npm start`) | Dev server; `i` / `a` / `w` for iOS / Android / web | |
+| `npx expo export` | Static export (iOS, Android, web) | needs network on first run |
 | `npx expo start --clear` | Dev server with a clean Metro cache | |
 
 ### Before you call a change done
@@ -132,19 +125,13 @@ the seed data deliberately uses anonymous IDs (`seed-med-N`).
 
 | Blocker | Effect | Tracking |
 | --- | --- | --- |
-| `assets/fonts/SpaceMono-Regular.ttf` missing | App won't bundle (`expo start`, `expo export`, EAS builds) | Linear **COR-90** |
 | No device run of the storage layer or the wizard | Benchmark (< 15 ms write) and encrypted-at-rest are proven only under Node | **COR-88**, **COR-91** |
-
-A local-only workaround while COR-90 is open: put a valid
-`SpaceMono-Regular.ttf` at that path, or stub the `useFonts` call — and **don't
-commit the stub**. (Check the font's licence before committing a real copy; that
-is the proper fix COR-90 exists for.)
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `Unable to resolve "../assets/fonts/SpaceMono-Regular.ttf"` | COR-90 above. |
+| `Unable to resolve "../assets/fonts/SpaceMono-Regular.ttf"` | Restore `assets/fonts/SpaceMono-Regular.ttf` (fixed in COR-90). |
 | `Cannot find module 'eslint'` | Run `npm ci`; `eslint` is a devDependency since the COR-75 follow-up. |
 | A new test never runs | Wrong file name for its runner (see [Testing](#testing)). |
 | `VaultKeyMissingError` on a device/simulator | Encrypted rows exist but the Keychain/Keystore entry is gone (reinstall, restore). By design the app won't mint a new key; `deleteVault()` is the explicit recovery. See [storage.md](storage.md#key-lifecycle-canary-verification--threat-model). |
