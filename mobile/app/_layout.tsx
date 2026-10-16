@@ -26,18 +26,19 @@ export default function RootLayout() {
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
+  // A font failure must not crash the shell: log it and fall back to the
+  // system monospace so the splash screen still dismisses.
   useEffect(() => {
-    if (error) throw error;
+    if (error) console.warn("Font loading failed:", error);
   }, [error]);
 
   useEffect(() => {
-    if (loaded) {
+    if (loaded || error) {
       SplashScreen.hideAsync();
     }
-  }, [loaded]);
+  }, [loaded, error]);
 
-  if (!loaded) {
+  if (!loaded && !error) {
     return null;
   }
 
