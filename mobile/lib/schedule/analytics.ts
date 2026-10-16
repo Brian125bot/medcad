@@ -11,7 +11,11 @@
  * - `sevenDayAdherencePct` is the same computation over `-6..0`.
  * - `byTimeOfDay` / `byMedication` count only doses in the 30-day window
  *   (pending today excluded); empty buckets report 100.
- * - Streaks scan `-45..0`. A scheduled day extends the streak only when
+ * - Streaks scan from the earliest valid medication `startDate` (on or
+ *   before `todayKey`) through today, clipped to `MAX_STREAK_LOOKBACK_DAYS`
+ *   (~10 years; longer histories saturate at the bound instead of scanning
+ *   unboundedly). Medications with invalid or future start dates do not move
+ *   the scan start. A scheduled day extends the streak only when
  *   every dose is handled without a miss (`taken` or `skipped`) AND at
  *   least one dose was `taken`. Days with no scheduled doses are skipped:
  *   they neither extend nor break the streak. An incomplete today (any
@@ -26,8 +30,39 @@ import type {
   Medication,
   TimeOfDayBlock,
 } from '../domain/medication-data';
-import { addDaysToKey } from './date-keys';
+import { addDaysToKey, diffDaysBetweenKeys, isValidDateKey } from './date-keys';
 import { getScheduledDosesForDate } from './doses';
+
+/**
+ * Safety bound on how far back the streak scan may reach (about 10 years of
+ * calendar days). A pathological `startDate` (e.g. year 1900) would otherwise
+ * scan tens of thousands of days times every medication on each call.
+ * When the bound clips the scan, reported streaks saturate at the bound:
+ * a true 40-year streak reads as `MAX_STREAK_LOOKBACK_DAYS` (+ today).
+ */
+export const MAX_STREAK_LOOKBACK_DAYS = 3660;
+
+/**
+ * Earliest valid medication `startDate` on or before `todayKey`, or `null`
+ * when no medication has one (invalid or future-only starts). Medications
+ * with invalid or future start dates contribute nothing to the streak scan.
+ * Purity note: pure function of its arguments.
+ */
+function earliestStreakScanStart(medications: Medication[], todayKey: string): string | null {
+  let earliest: string | null = null;
+  for (const med of medications) {
+    if (!isValidDateKey(med.startDate)) {
+      continue;
+    }
+    if (diffDaysBetweenKeys(med.startDate, todayKey) < 0) {
+      continue;
+    }
+    if (earliest === null || diffDaysBetweenKeys(med.startDate, earliest) < 0) {
+      earliest = med.startDate;
+    }
+  }
+  return earliest;
+}
 
 /**
  * Adherence summary for the 30 days ending at `todayKey`.
@@ -95,44 +130,50 @@ export function computeAdherenceAnalytics(
     item.pct = item.total > 0 ? Math.round((item.taken / item.total) * 100) : 100;
   });
 
-  // Compute streaks over the 46 days ending today (-45..0); see module docs.
+  // Compute the streak over the full medication history: from the earliest
+  // valid startDate (clipped to MAX_STREAK_LOOKBACK_DAYS) through todayKey.
+  // Days before a medication's own start are simply unscheduled (skipped).
+  const scanStart = earliestStreakScanStart(medications, todayKey);
   let currentStreakDays = 0;
   let bestStreakDays = 0;
   let runningStreak = 0;
 
-  for (let offset = -45; offset <= 0; offset += 1) {
-    const dKey = addDaysToKey(todayKey, offset);
-    const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
-    if (doses.length === 0) {
-      // No scheduled doses: neither breaks nor extends. When today itself is
-      // empty, the current streak is yesterday's running streak (not zero).
-      if (offset === 0) {
-        currentStreakDays = runningStreak;
+  if (scanStart !== null) {
+    const lookbackDays = Math.min(diffDaysBetweenKeys(scanStart, todayKey), MAX_STREAK_LOOKBACK_DAYS);
+    for (let offset = -lookbackDays; offset <= 0; offset += 1) {
+      const dKey = addDaysToKey(todayKey, offset);
+      const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
+      if (doses.length === 0) {
+        // No scheduled doses: neither breaks nor extends. When today itself is
+        // empty, the current streak is yesterday's running streak (not zero).
+        if (offset === 0) {
+          currentStreakDays = runningStreak;
+        }
+        continue;
       }
-      continue;
-    }
 
-    const allHandledWithoutMiss = doses.every(
-      (d) => d.effectiveStatus === 'taken' || d.effectiveStatus === 'skipped',
-    );
-    const anyTaken = doses.some((d) => d.effectiveStatus === 'taken');
+      const allHandledWithoutMiss = doses.every(
+        (d) => d.effectiveStatus === 'taken' || d.effectiveStatus === 'skipped',
+      );
+      const anyTaken = doses.some((d) => d.effectiveStatus === 'taken');
 
-    if (offset === 0) {
-      // If today is already 100% complete, include today in streak; if still in progress with no missed doses, keep yesterday's streak
-      if (allHandledWithoutMiss && anyTaken) {
+      if (offset === 0) {
+        // If today is already 100% complete, include today in streak; if still in progress with no missed doses, keep yesterday's streak
+        if (allHandledWithoutMiss && anyTaken) {
+          runningStreak += 1;
+          if (runningStreak > bestStreakDays) {
+            bestStreakDays = runningStreak;
+          }
+        }
+        currentStreakDays = runningStreak;
+      } else if (allHandledWithoutMiss && anyTaken) {
         runningStreak += 1;
         if (runningStreak > bestStreakDays) {
           bestStreakDays = runningStreak;
         }
+      } else {
+        runningStreak = 0;
       }
-      currentStreakDays = runningStreak;
-    } else if (allHandledWithoutMiss && anyTaken) {
-      runningStreak += 1;
-      if (runningStreak > bestStreakDays) {
-        bestStreakDays = runningStreak;
-      }
-    } else {
-      runningStreak = 0;
     }
   }
 

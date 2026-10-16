@@ -21,7 +21,9 @@
  *
  * ## Streak rules (`analytics.ts`)
  * The 30-day window ending today counts logged today doses but excludes
- * pending today doses. Streaks scan the 46 days ending today: a scheduled
+ * pending today doses. Streaks scan from the earliest valid medication
+ * `startDate` through today (clipped to `MAX_STREAK_LOOKBACK_DAYS`, ~10
+ * years; longer histories saturate at the bound): a scheduled
  * day extends the streak only if every dose is `taken`/`skipped` with at
  * least one `taken`. Empty days are skipped (never break/extend). An
  * incomplete today never breaks the streak; a fully complete today extends
@@ -62,7 +64,7 @@ export {
   MAX_PROJECTION_DAYS,
   NO_CONSUMPTION_DAYS,
 } from './supply';
-export { computeAdherenceAnalytics } from './analytics';
+export { computeAdherenceAnalytics, MAX_STREAK_LOOKBACK_DAYS } from './analytics';
 export type {
   AdherenceAnalyticsSummary,
   DoseLogEntry,
