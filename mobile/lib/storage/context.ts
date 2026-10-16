@@ -1091,18 +1091,17 @@ export async function seedDemoVault(
   repository: MedicationRepository,
   seedTodayKey?: string,
 ): Promise<void> {
-  const { createInitialSeedData, estimateDaysOfSupplyRemaining } = await import('../domain/medication-data');
+  const { createInitialSeedData } = await import('../domain/medication-data');
   const seed = createInitialSeedData(seedTodayKey || new Date().toISOString().slice(0, 10));
-  // Clamp demo inventory to currentUnits so showing history never drains stock,
-  // and strip drug names from storage IDs (they would otherwise sit in plaintext PKs).
+  // Strip drug names from storage IDs (they would otherwise sit in plaintext PKs).
+  // Inventory is stored EXACTLY as the seed defines it — history logs are written
+  // via logDoseAt, which never touches inventory, so showing history can't drain stock.
   const anonymized = seed.medications.map((med, index) => {
-    const supply = Math.max(1, estimateDaysOfSupplyRemaining(med));
     const medId = `seed-med-${index + 1}`;
     return {
       ...med,
       id: medId,
       timeSlots: med.timeSlots.map((slot, slotIndex) => ({ ...slot, id: `seed-slot-${index + 1}-${slotIndex + 1}` })),
-      inventory: { ...med.inventory, currentUnits: Math.max(med.inventory.currentUnits, supply) },
     };
   });
   const logRemap = new Map<string, string>();
