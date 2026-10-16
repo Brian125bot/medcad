@@ -5,7 +5,7 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import type { Medication } from "@/lib/domain/medication-data";
 import { getStorageContext } from "@/lib/storage";
 
-/** Regimen tab: medication list, entry point for the COR-75 add / edit wizard. */
+/** Regimen tab: medication list. Rows open the COR-75 edit wizard; add is the header's "+ Add". */
 export default function RegimenScreen() {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [failed, setFailed] = useState(false);
@@ -28,10 +28,10 @@ export default function RegimenScreen() {
       <FlatList
         data={meds}
         keyExtractor={(m) => m.id}
-        contentContainerClassName="px-5 pb-28 pt-4"
+        contentContainerClassName="px-5 pt-4"
         ListEmptyComponent={
           <Text className="mt-10 text-center text-slate-500">
-            {failed ? "Could not load medications." : "No medications yet."}
+            {failed ? "Could not load medications." : "No medications yet. Tap + Add to create one."}
           </Text>
         }
         renderItem={({ item }) => (
@@ -45,11 +45,6 @@ export default function RegimenScreen() {
           </Link>
         )}
       />
-      <Link href="/medication/new" asChild>
-        <Pressable accessibilityRole="button" className="absolute bottom-6 left-5 right-5 items-center rounded-xl bg-cadence-accent py-3.5">
-          <Text className="text-base font-semibold text-white">+ Add medication</Text>
-        </Pressable>
-      </Link>
     </View>
   );
 }

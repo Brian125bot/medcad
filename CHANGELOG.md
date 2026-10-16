@@ -29,12 +29,12 @@ the issue id and PR number where there are any.
   `cadenceTokens` colours). Today, Insights and Cabinet are placeholders for
   COR-74, COR-80 and COR-78. The Today tab's `tabBarBadge` is wired to a count
   that has no source yet, so no badge shows until COR-74. *(COR-73)*
-- **[mobile]** Shared tab header: screen title with the date in the device
-  locale (e.g. "Fri, Oct 16"), a static **"Local only"** sync pill (cloud sync,
+- **[mobile]** Shared tab header: the date in the device locale (e.g.
+  "Fri, Oct 16"), a static **"Local only"** sync pill (cloud sync,
   COR-84, doesn't exist yet) and a **"+ Add"** action that opens the add
   medication modal. *(COR-73)*
-- **[mobile]** `lib/navigation` (tab set, `toTabBadge`, `formatHeaderDate`) with
-  `tests/navigation.spec.ts`; 145 → 158 tests. *(COR-73)*
+- **[mobile]** `lib/navigation` (tab set, `toTabBadge`, `formatHeaderDate`,
+  `themeTabHref`) with `tests/navigation.spec.ts`; 145 → 160 tests. *(COR-73)*
 - **[mobile]** `Medication.appearance` — the pill shape and colours chosen in the
   wizard are now **saved**. They live inside the encrypted medication payload, so
   no schema migration is needed; medications saved before this load with no
@@ -52,16 +52,31 @@ the issue id and PR number where there are any.
   *(PR #8)*
 
 ### Changed
+- **[mobile]** Tab header follows the agreed COR-73 design: the locale date is
+  the main header text with the **"Local only"** pill beside it; **"+ Add"**
+  stays on the right. The tab name is no longer shown in the header (it stays
+  in the tab bar). *(COR-73 follow-up)*
+- **[mobile]** Tab icons: Today `CalendarDays`, Insights `TrendingUp` (Regimen
+  `Pill` and Cabinet `Package` unchanged). *(COR-73 follow-up)*
+- **[mobile]** The **Theme** screen is a tab again in development builds only
+  (`href: themeTabHref(__DEV__)`); production builds still hide it and redirect
+  `/two` to Today. *(COR-73 follow-up)*
+- **[mobile]** Regimen empty state now reads "No medications yet. Tap + Add to
+  create one." *(COR-73 follow-up)*
 - **[mobile]** The medication list moved from the **Medications** tab
   (`app/(tabs)/medications.tsx`) to the **Regimen** tab (`app/(tabs)/regimen.tsx`,
   route `/regimen`), unchanged. `/` now redirects to `/today`. *(COR-73)*
-- **[mobile]** The scaffold **Theme** screen (`/two`) is hidden from the tab bar
-  and only renders in development builds. *(COR-73)*
+- **[mobile]** The scaffold **Theme** screen (`/two`) only renders in
+  development builds. *(COR-73)*
 - **[mobile]** `PillShape` / `PillAppearance` moved from `lib/wizard` into
   `lib/domain/medication-data.ts` (re-exported from the wizard module, so
   existing imports still work). *(PR #8)*
 - **[mobile]** Any unusable dose now shows one message: *"Dose must be a number
   greater than 0, e.g. 1 or 0.5."* *(PR #8)*
+
+### Removed
+- **[mobile]** The floating "+ Add medication" button on Regimen; adding is
+  done from the header's "+ Add" on every tab. *(COR-73 follow-up)*
 
 ### Fixed
 - **[mobile]** The wizard's "Pill look" step used to be discarded on save, and

@@ -4,7 +4,14 @@ import {
   msUntilNextLocalMidnight,
   SYNC_STATUS_LABEL,
 } from '../lib/navigation/header';
-import { INITIAL_TAB, MAX_TAB_BADGE_COUNT, PRIMARY_TABS, toTabBadge } from '../lib/navigation/tabs';
+import {
+  INITIAL_TAB,
+  MAX_TAB_BADGE_COUNT,
+  PRIMARY_TABS,
+  THEME_TAB_ROUTE,
+  themeTabHref,
+  toTabBadge,
+} from '../lib/navigation/tabs';
 
 describe('PRIMARY_TABS', () => {
   it('is exactly Today, Regimen, Insights, Cabinet in that order', () => {
@@ -87,5 +94,16 @@ describe('msUntilNextLocalMidnight', () => {
 describe('SYNC_STATUS_LABEL', () => {
   it('is the fixed local-only placeholder until cloud sync exists', () => {
     expect(SYNC_STATUS_LABEL).toBe('Local only');
+  });
+});
+
+describe('themeTabHref', () => {
+  it('shows the Theme tab at /two in development builds', () => {
+    expect(THEME_TAB_ROUTE).toBe('/two');
+    expect(themeTabHref(true)).toBe('/two');
+  });
+
+  it('hides the Theme tab in production builds', () => {
+    expect(themeTabHref(false)).toBeNull();
   });
 });

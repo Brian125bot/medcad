@@ -10,7 +10,7 @@ Native screens are thin.
 | Wizard UI (steps, chips, swatches, inputs) | `components/medication-wizard/MedicationWizard.tsx` |
 | Native date / time picker | `components/medication-wizard/NativePickerField.tsx` |
 | Live pill preview (SVG) | `components/medication-wizard/PillPreview.tsx` |
-| Entry points | `app/(tabs)/regimen.tsx` (Regimen tab: list + "Add medication"), the shared tab header's "+ Add", `app/medication/new.tsx`, `app/medication/[id].tsx` (both presented as modals) |
+| Entry points | `app/(tabs)/regimen.tsx` (Regimen tab: list; rows open edit), the shared tab header's "+ Add" (every tab), `app/medication/new.tsx`, `app/medication/[id].tsx` (both presented as modals) |
 | Tests | `tests/wizard-medication-form.spec.ts` (logic only — see [Testing](#testing)) |
 
 ## Flow
