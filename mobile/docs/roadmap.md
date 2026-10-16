@@ -28,7 +28,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
-| COR-73 | Bottom tab navigation and headers | 3 | Backlog | Blocks COR-74, COR-78, COR-80 |
+| COR-73 | Bottom tab navigation and headers | 3 | **Done** | PR #10 + agreed-design follow-up (header, icons, Theme tab, Regimen) |
 | COR-74 | Daily protocol screen with swipe gestures | 5 | In review | Built: [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-90). Blocks COR-77 |
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | Backlog | **Overlaps PR #8** (merged) — see below |
