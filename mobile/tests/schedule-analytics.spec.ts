@@ -323,4 +323,14 @@ describe('streak scan start', () => {
     expect(summary.currentStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
     expect(summary.bestStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
   });
+
+  it('clips taken history beyond the bound instead of counting it', () => {
+    // 4000 taken days with a 1900 anchor: the scan only sees the last 3660.
+    // Removing the MAX_STREAK_LOOKBACK_DAYS bound would report 4000/4000.
+    const med = makeMedication({ startDate: '1900-01-01' });
+    const logs = seedTaken([med], TODAY, -4000);
+    const summary = computeAdherenceAnalytics([med], logs, TODAY);
+    expect(summary.currentStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
+    expect(summary.bestStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
+  });
 });
