@@ -46,6 +46,21 @@ async function main() {
   assert.deepStrictEqual(roundTripped, medicationDbEquivalent);
   assert.strictEqual((await repository.getAllMedications()).length, 1);
 
+  // Pill look round-trips through the encrypted payload and never hits a plaintext column.
+  const styled: Medication = {
+    ...medication,
+    id: 'med-styled',
+    appearance: { shape: 'oval', primaryColor: '#fca5a5', secondaryColor: '#0f172a' },
+  };
+  await repository.saveMedication(styled);
+  assert.deepStrictEqual((await repository.getMedicationById('med-styled'))?.appearance, styled.appearance);
+  const rawRows = await driver.all<Record<string, unknown>>('SELECT * FROM medications WHERE id = ?', ['med-styled']);
+  assert.strictEqual(rawRows.length, 1);
+  assert.ok(!JSON.stringify(rawRows[0]).includes('#fca5a5'), 'appearance must not be stored in plaintext');
+  // Medications saved before the pill builder load with no appearance.
+  assert.strictEqual((await repository.getMedicationById('med-1'))?.appearance, undefined);
+  await repository.deleteMedication('med-styled');
+
   const updated: Medication = { ...medication, timeSlots: [medication.timeSlots[0]], name: 'Lisinopril HD' };
   await repository.saveMedication(updated);
   assert.strictEqual((await repository.getMedicationById('med-1'))?.name, 'Lisinopril HD');

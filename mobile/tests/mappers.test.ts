@@ -13,6 +13,7 @@ const medication: Medication = {
   purpose: 'Blood Pressure',
   instructions: 'Take with water',
   prescriber: 'Dr. Test',
+  appearance: { shape: 'capsule', primaryColor: '#93c5fd', secondaryColor: '#fdba74' },
   frequency: 'specific_days',
   daysOfWeek: [1, 3, 5],
   intervalDays: undefined,
@@ -42,3 +43,27 @@ assert.strictEqual(reconstructed.timeSlots[0].reminderEnabled, false);
 assert.deepStrictEqual(reconstructed, medication);
 
 console.log('✓ mapper round-trip');
+
+// Appearance: absent stays absent (no `appearance` key invented), invalid stored values are dropped.
+const { appearance: _omit, ...withoutAppearance } = medication;
+void _omit;
+const bare = domainMedicationToRows(withoutAppearance as Medication);
+assert.strictEqual((bare.medicationRow as { appearance?: unknown }).appearance, null);
+assert.strictEqual('appearance' in rowsToDomainMedication(bare.medicationRow, bare.timeSlotRows), false);
+for (const bad of [
+  { shape: 'square', primaryColor: '#ffffff', secondaryColor: '#000000' },
+  { shape: 'round', primaryColor: 'red', secondaryColor: '#000000' },
+  { shape: 'round', primaryColor: '#ffffff', secondaryColor: '#12345' },
+  { shape: 'round', primaryColor: '#ffffff' },
+  'round',
+  42,
+  null,
+]) {
+  const row = { ...medicationRow, appearance: bad };
+  assert.strictEqual('appearance' in rowsToDomainMedication(row, timeSlotRows), false);
+}
+// The mapped value is a copy, not an alias of the stored row.
+const copied = rowsToDomainMedication(medicationRow, timeSlotRows);
+assert.notStrictEqual(copied.appearance, medicationRow.appearance);
+
+console.log('✓ mapper appearance handling');
