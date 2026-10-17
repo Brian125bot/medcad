@@ -34,7 +34,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | **Done** | Delivered by PR #8 (appearance in the encrypted payload, no migration) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | **Done** | `SpaceMono-Regular.ttf` + OFL in `assets/fonts/` |
 | COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Unblocked by COR-90 |
-| COR-93 | Handle `dose_logs` for slots removed in edit | 2 | Backlog | Orphaned logs when dose times are removed in edit |
+| COR-93 | Handle `dose_logs` for slots removed in edit | 2 | **In Review** | Past logs kept as history with an encrypted `slotSnapshot`; counted by analytics; future-dated logs removed |
 | COR-95 | Editor save overwrites stock logged on Today | – | **Done** | `9e2d6db`; was gap 6 |
 | COR-96 | Undo refunds current slot dose, not units taken | – | **Done** | `b5aefbd`; was gap 4 |
 
@@ -101,8 +101,8 @@ that are not recorded here.
    wizard QA on iOS/Android next.
 2. **Device QA of COR-74 (Today)** — gestures, haptics, ring and layout have
    only been type-checked.
-3. **COR-93** — Today must not show phantom doses for removed slots (the undo
-   drift is fixed by COR-96).
+3. ~~**COR-93**~~ — in review: orphan logs keep a `slotSnapshot` and count as
+   history; Today shows current slots only.
 4. **COR-76** is independent of 73/74 and can run in parallel; its design work
    (post-save hook, rolling schedule window) needs no device, its acceptance
    test does.
@@ -115,7 +115,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | # | Gap | Effect | Where to read more | Linear |
 | --- | --- | --- | --- | --- |
 | 1 | Nothing has run on a device | The `< 15 ms` write benchmark and the encrypted-at-rest claim are proven only under Node; wizard UI, pickers and modals are unverified on iOS/Android | [storage.md](storage.md#latency-benchmark-local-developer-machine--not-ci-not-device) | COR-88, COR-91 |
-| 3 | Removing a dose time orphans its `dose_logs` | History, streaks and analytics can reference slots that no longer exist; `deleteMedication` orphans logs the same way | [storage.md](storage.md#behaviours-worth-knowing) | COR-93 |
+| 3 | ~~Removing a dose time orphans its `dose_logs`~~ **Handled** | Policy: logs up to today are kept as history and carry an encrypted `slotSnapshot`, so analytics count them under the snapshot label (deleted medications: not in `byMedication`); future-dated logs are removed. Logs from before COR-93 have no snapshot and are skipped by analytics once orphaned | [storage.md](storage.md#behaviours-worth-knowing) | COR-93 |
 | 4 | ~~Undo restores the slot's current dose~~ **Fixed** | `taken` logs now record `unitsTaken` in the encrypted payload and undo / un-take refunds that amount; legacy logs fall back to the slot's current dose (or 1). The clamp-at-0 drift (storage.md) still applies | [storage.md](storage.md#behaviours-worth-knowing) | COR-96 (Done) |
 | 5 | `logDose` doesn't validate ids | An unknown medication id writes an orphan log row without error; an unknown slot id assumes 1 unit | [storage.md](storage.md#behaviours-worth-knowing) | Untracked |
 | 6 | ~~Edit saves a snapshot of `currentUnits`~~ **Fixed** | The editor now saves with `inventoryBaseline`; the repository re-reads stock under the write gate and applies only the user's change, so doses logged while the editor is open survive | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-95 (Done) |

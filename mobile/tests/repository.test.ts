@@ -3,6 +3,8 @@ import { createStorageContext } from '../lib/storage/context';
 import { domainMedicationToRows, rowsToDomainMedication } from '../lib/storage/mappers';
 import { memoryKeystore, nodeCipher, nodeSqlDriver, VaultIntegrityError } from './fixtures';
 import type { Medication } from '../lib/domain/medication-data';
+import { addDaysToKey, getScheduledDosesForDate, isDoseSlotSnapshot, toDateKey } from '../lib/domain/medication-data';
+import { computeAdherenceAnalytics } from '../lib/schedule/analytics';
 
 console.log('=== repository.test ===');
 
@@ -247,6 +249,93 @@ async function main() {
     assert.strictEqual(await repository.getMedicationById('snap-rollback'), null);
     assert.strictEqual((await driver.all('SELECT id FROM dose_logs')).length, before);
     await repository.deleteMedication('snap-med');
+  }
+
+  // COR-93: dose logs outlive a removed slot / deleted medication as history carrying a slotSnapshot.
+  {
+    const today = toDateKey(new Date());
+    const day = (offset: number) => addDaysToKey(today, offset);
+    const orphanMed: Medication = {
+      ...medication,
+      id: 'med-orphan',
+      startDate: today,
+      timeSlots: [
+        { id: 'keep', label: 'Morning', time: '08:00', doseUnits: 2, reminderEnabled: true },
+        { id: 'drop', label: 'Evening', time: '18:00', doseUnits: 1, reminderEnabled: true },
+        { id: 'big', label: 'Bedtime', time: '22:00', doseUnits: 3, reminderEnabled: true },
+      ],
+      inventory: { ...medication.inventory, currentUnits: 10 },
+    };
+    await repository.saveMedication(orphanMed);
+    const stock = async () => (await repository.getMedicationById('med-orphan'))!.inventory.currentUnits;
+    const mine = <T extends { medicationId: string }>(logs: T[]) => logs.filter((log) => log.medicationId === 'med-orphan');
+    const orphanLogs = async () => mine(await repository.getDoseLogsInRange(day(-30), day(30)));
+    const evening = { time: '18:00', label: 'Evening', doseUnits: 1 };
+
+    const takenLog = await repository.logDose(day(-1), 'med-orphan', 'drop', 'taken', undefined, '18:05'); // 10 -> 9
+    assert.deepStrictEqual(takenLog.log.slotSnapshot, evening);
+    await repository.logDose(today, 'med-orphan', 'drop', 'skipped', 'not today', '18:10');
+    await repository.logDoseAt(day(-2), 'med-orphan', 'big', 'taken', '22:00'); // seeded: no stock, no unitsTaken
+    await repository.logDoseAt(day(1), 'med-orphan', 'drop', 'taken', '18:00'); // future-dated
+    assert.strictEqual(await stock(), 9);
+    assert.deepStrictEqual(mine(await repository.getDoseLogsByDate(day(-1)))[0].slotSnapshot, evening);
+    const rawOrphan = JSON.stringify(await driver.all("SELECT * FROM dose_logs WHERE medication_id = 'med-orphan'"));
+    assert.ok(
+      !rawOrphan.includes('slotSnapshot') && !rawOrphan.includes('Evening') && !rawOrphan.includes('Bedtime'),
+      'slotSnapshot must stay inside enc_payload',
+    );
+
+    // Remove two dose times: past/today logs survive with their snapshot, the future one is dropped.
+    const beforeEdit = (await repository.getMedicationById('med-orphan'))!;
+    await repository.saveMedication({ ...beforeEdit, timeSlots: beforeEdit.timeSlots.filter((slot) => slot.id === 'keep') });
+    const survivors = await orphanLogs();
+    assert.deepStrictEqual(
+      survivors.map((log) => [log.dateKey, log.slotId, log.status]),
+      [[day(-2), 'big', 'taken'], [day(-1), 'drop', 'taken'], [today, 'drop', 'skipped']],
+    );
+    assert.deepStrictEqual(survivors[0].slotSnapshot, { time: '22:00', label: 'Bedtime', doseUnits: 3 });
+    assert.strictEqual(await stock(), 9, 'removing a slot never touches stock');
+
+    // Analytics count them under the snapshot label; Today expands current slots only (no phantom dose).
+    const allLogs = await repository.getAllDoseLogs();
+    const myLogs = Object.fromEntries(Object.entries(allLogs).filter(([, log]) => log.medicationId === 'med-orphan'));
+    const edited = (await repository.getMedicationById('med-orphan'))!;
+    const summary = computeAdherenceAnalytics([edited], myLogs, today);
+    assert.deepStrictEqual(summary.byTimeOfDay.Evening, { taken: 1, total: 2, pct: 50 });
+    assert.deepStrictEqual(summary.byTimeOfDay.Bedtime, { taken: 1, total: 1, pct: 100 });
+    assert.deepStrictEqual([summary.byMedication[0].taken, summary.byMedication[0].total], [2, 3]);
+    assert.deepStrictEqual(getScheduledDosesForDate([edited], myLogs, today, today).map((dose) => dose.slot.id), ['keep']);
+
+    // Re-marking an orphan keeps its snapshot; undo refunds unitsTaken, else the snapshot's dose.
+    await repository.logDose(today, 'med-orphan', 'drop', 'skipped', 'still not', '18:20');
+    assert.deepStrictEqual(mine(await repository.getDoseLogsByDate(today))[0].slotSnapshot, evening);
+    await repository.undoDose(day(-1), 'med-orphan', 'drop');
+    assert.strictEqual(await stock(), 10);
+    await repository.undoDose(day(-2), 'med-orphan', 'big');
+    assert.strictEqual(await stock(), 13, 'no unitsTaken and no live slot: refund the snapshot dose (3)');
+
+    // deleteMedication keeps past/today logs readable; future ones go. Analytics count them but
+    // not per medication, since the medication is gone.
+    await repository.logDose(day(-1), 'med-orphan', 'keep', 'taken', undefined, '08:05');
+    await repository.logDoseAt(day(2), 'med-orphan', 'keep', 'taken', '08:00');
+    await repository.deleteMedication('med-orphan');
+    const afterDelete = await orphanLogs();
+    assert.deepStrictEqual(afterDelete.map((log) => [log.dateKey, log.slotId]), [[day(-1), 'keep'], [today, 'drop']]);
+    assert.deepStrictEqual(afterDelete[0].slotSnapshot, { time: '08:00', label: 'Morning', doseUnits: 2 });
+    const deletedSummary = computeAdherenceAnalytics(
+      [],
+      Object.fromEntries(afterDelete.map((log) => [log.key, log])),
+      today,
+    );
+    assert.deepStrictEqual(deletedSummary.byMedication, []);
+    assert.deepStrictEqual([deletedSummary.totalTaken30d, deletedSummary.totalScheduled30d], [1, 2]);
+    assert.deepStrictEqual(deletedSummary.byTimeOfDay.Morning, { taken: 1, total: 1, pct: 100 });
+
+    // Snapshots are untrusted on read.
+    assert.ok(isDoseSlotSnapshot(evening));
+    for (const bad of [null, 'x', { ...evening, time: '25:00' }, { ...evening, label: 'Noon' }, { ...evening, doseUnits: 0 }, { ...evening, doseUnits: Number.NaN }]) {
+      assert.ok(!isDoseSlotSnapshot(bad));
+    }
   }
 
   await repository.deleteMedication('med-1');

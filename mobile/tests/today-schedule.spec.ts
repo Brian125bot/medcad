@@ -644,3 +644,31 @@ describe('TodayStore with the COR-71 encrypted repository', () => {
     expect(store.getState().medications[0].inventory.currentUnits).toBe(59);
   });
 });
+
+describe('Today after a dose time is removed (COR-93)', () => {
+  it('shows no phantom dose while the orphan log stays as history', async () => {
+    const { repository } = await createStorageContext({ driver: nodeSqlDriver(), cipher: nodeCipher(), keystore: memoryKeystore() });
+    await repository.saveMedication(twoSlot());
+    const store = new TodayStore(repository, () => at(TODAY, '18:30'));
+    await store.ensureLoaded();
+    const pm = view(store, '18:30').doses[1];
+    await store.markDoseTaken(pm);
+    expect(store.getState().medications[0].inventory.currentUnits).toBe(58);
+
+    const stored = (await repository.getMedicationById('med-b'))!;
+    await repository.saveMedication({ ...stored, timeSlots: stored.timeSlots.filter((slot) => slot.id !== 'pm') });
+    await store.load();
+    const vm = view(store, '18:30');
+    expect(vm.doses.map((d) => d.slot.id)).toEqual(['am']);
+    expect(vm.progress.total).toBe(1);
+    expect(store.getState().logs[pm.key]).toMatchObject({
+      status: 'taken',
+      slotSnapshot: { time: '18:00', label: 'Evening', doseUnits: 2 },
+    });
+    expect(vm.adherence.thirtyDayPct).toBe(33); // 14th + 15th missed, today's removed-slot dose taken
+    expect(store.getState().medications[0].inventory.currentUnits).toBe(58);
+
+    const undone = await repository.undoDose(TODAY, 'med-b', 'pm');
+    expect(undone.updatedMedication?.inventory.currentUnits).toBe(60);
+  });
+});

@@ -126,7 +126,10 @@ These are current behaviours, not endorsements — several are tracked in the
   stored stock and applies only `form currentUnits - baseline`, so a dose logged
   on Today while the editor is open is kept.
 - **Removing a dose time** deletes that slot row immediately on save, with no
-  confirmation, and leaves its past `dose_logs` behind (COR-93).
+  confirmation. Its `dose_logs` up to today are kept as history: each carries a
+  `slotSnapshot` (time, label, dose) so Insights/analytics still count it, while
+  Today no longer shows the slot. Logs dated after today are removed (COR-93,
+  see [storage.md](storage.md#behaviours-worth-knowing)).
 - **`nextFillDate` is not recalculated** when schedule or inventory change
   (COR-94).
 - **No notification hook.** Saving does not (re)schedule reminders; COR-76
