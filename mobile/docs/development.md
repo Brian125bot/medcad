@@ -47,7 +47,10 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test
 npm run test:tz
 ```
 
-There is **no CI** (no `.github/` directory): this local gate is the only gate.
+CI (`.github/workflows/ci.yml`, GitHub Actions, Node 22) runs this gate on every
+pull request and push to `main`, plus `npm run test:tz` and
+`npx expo export --platform all`. Use Node 22 locally too (`mobile/.nvmrc`;
+`package.json` requires `node >=22` because the storage tests use `node:sqlite`).
 `mobile/AGENTS.md` says to run lint and typecheck before declaring any task
 done; the commands above are that rule, made concrete.
 

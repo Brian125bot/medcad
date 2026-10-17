@@ -54,5 +54,8 @@
     "typecheck:storage": "tsc --noEmit -p tsconfig.test.json",
     "lint": "expo lint"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  }
 }

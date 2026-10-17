@@ -26,6 +26,17 @@ the issue id and PR number where there are any.
 ## [Unreleased]
 
 ### Added
+- **CI:** GitHub Actions workflow `.github/workflows/ci.yml` for `mobile/`. Runs on
+  pull requests and pushes to `main`, Node 22 with an npm cache, read-only
+  permissions, superseded runs cancelled, no secrets: `npm ci`, `tsc --noEmit`,
+  `typecheck:storage`, lint, `npm test` (100 % coverage gate), `test:tz`,
+  `expo export --platform all`. The root web prototype is not included (its
+  `check` / `lint` / `test` scripts fail today and it has no npm lockfile).
+- **[mobile]** `"engines": { "node": ">=22" }` and `mobile/.nvmrc` (22): the
+  storage tests need `node:sqlite`.
+
+
+### Added
 - **[mobile]** COR-88 device storage benchmark tooling (no device numbers yet):
   `lib/storage/device-benchmark.ts` times cold init, a 10-medication / 500-log
   single-transaction seed, a 365-day range query and a dose → taken update with
