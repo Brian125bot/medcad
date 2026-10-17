@@ -25,10 +25,19 @@
  *   streak to 0, matching the web implementation. Skipped doses are not
  *   misses for the adherence rate, but a skipped-only day does not extend
  *   the streak.
+ * - Orphan logs (COR-93) are history: a log whose slot was removed from its
+ *   medication, or whose medication was deleted, still counts on its day with
+ *   its own status, bucketed by its stored `slotSnapshot.label`. Orphans of a
+ *   deleted medication count toward totals, `byTimeOfDay` and streaks but not
+ *   `byMedication`; orphans of a paused (inactive) medication are excluded,
+ *   like the rest of its history. Logs without a snapshot (written before
+ *   COR-93) and logs dated after `todayKey` are ignored. Orphan dates can move
+ *   the streak scan start earlier.
  */
 import type {
   AdherenceAnalyticsSummary,
   DoseLogMap,
+  DoseStatus,
   Medication,
   TimeOfDayBlock,
 } from '../domain/medication-data';
@@ -66,6 +75,52 @@ function earliestStreakScanStart(medications: Medication[], todayKey: string): s
   return earliest;
 }
 
+/** One dose as analytics sees it: a scheduled slot or an orphan log. */
+interface CountedDose {
+  label: TimeOfDayBlock;
+  status: DoseStatus | 'pending';
+  /** `null` when the medication no longer exists. */
+  medicationId: string | null;
+}
+
+/**
+ * Orphan logs on or before `todayKey`, grouped by date key (see the module
+ * comment for the rules). Pure function of its arguments.
+ */
+function collectOrphanDoses(
+  medications: Medication[],
+  logs: DoseLogMap,
+  todayKey: string,
+): Map<string, CountedDose[]> {
+  const medsById = new Map(medications.map((med) => [med.id, med]));
+  const byDate = new Map<string, CountedDose[]>();
+  for (const log of Object.values(logs)) {
+    if (!log.slotSnapshot || !isValidDateKey(log.dateKey) || diffDaysBetweenKeys(log.dateKey, todayKey) < 0) {
+      continue;
+    }
+    const med = medsById.get(log.medicationId);
+    if (med && (!med.active || med.timeSlots.some((slot) => slot.id === log.slotId))) {
+      continue;
+    }
+    const dose: CountedDose = { label: log.slotSnapshot.label, status: log.status, medicationId: med ? med.id : null };
+    const day = byDate.get(log.dateKey);
+    if (day) {
+      day.push(dose);
+    } else {
+      byDate.set(log.dateKey, [dose]);
+    }
+  }
+  return byDate;
+}
+
+/** Earlier of two optional date keys. */
+function earlierKey(a: string | null, b: string | null): string | null {
+  if (a === null || b === null) {
+    return a ?? b;
+  }
+  return diffDaysBetweenKeys(a, b) < 0 ? b : a;
+}
+
 /**
  * Adherence summary for the 30 days ending at `todayKey`.
  * Pure function of its arguments; no hidden clock.
@@ -95,13 +150,21 @@ export function computeAdherenceAnalytics(
     medCounter[med.id] = { taken: 0, total: 0 };
   }
 
+  const orphansByDate = collectOrphanDoses(medications, logs, todayKey);
+  const dosesForDate = (dKey: string): CountedDose[] => {
+    const scheduled = getScheduledDosesForDate(medications, logs, dKey, todayKey).map(
+      (d): CountedDose => ({ label: d.slot.label, status: d.effectiveStatus, medicationId: d.medication.id }),
+    );
+    const orphans = orphansByDate.get(dKey);
+    return orphans ? scheduled.concat(orphans) : scheduled;
+  };
+
   // Evaluate past 30 days (including today for completed logs, or past 29 days + today)
   for (let offset = -29; offset <= 0; offset += 1) {
     const dKey = addDaysToKey(todayKey, offset);
-    const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
-    for (const d of doses) {
+    for (const d of dosesForDate(dKey)) {
       // On today, only count doses that have already been logged so pending evening doses don't penalize 30d rate
-      if (offset === 0 && d.effectiveStatus === 'pending') {
+      if (offset === 0 && d.status === 'pending') {
         continue;
       }
       totalScheduled30d += 1;
@@ -109,19 +172,24 @@ export function computeAdherenceAnalytics(
         totalScheduled7d += 1;
       }
 
-      byTimeOfDay[d.slot.label].total += 1;
-      medCounter[d.medication.id].total += 1;
+      byTimeOfDay[d.label].total += 1;
+      const counter = d.medicationId === null ? undefined : medCounter[d.medicationId];
+      if (counter) {
+        counter.total += 1;
+      }
 
-      if (d.effectiveStatus === 'taken') {
+      if (d.status === 'taken') {
         totalTaken30d += 1;
         if (offset >= -6) {
           totalTaken7d += 1;
         }
-        byTimeOfDay[d.slot.label].taken += 1;
-        medCounter[d.medication.id].taken += 1;
-      } else if (d.effectiveStatus === 'skipped') {
+        byTimeOfDay[d.label].taken += 1;
+        if (counter) {
+          counter.taken += 1;
+        }
+      } else if (d.status === 'skipped') {
         totalSkipped30d += 1;
-      } else if (d.effectiveStatus === 'missed') {
+      } else if (d.status === 'missed') {
         totalMissed30d += 1;
       }
     }
@@ -135,7 +203,11 @@ export function computeAdherenceAnalytics(
   // Compute the streak over the full medication history: from the earliest
   // valid startDate (clipped to MAX_STREAK_LOOKBACK_DAYS) through todayKey.
   // Days before a medication's own start are simply unscheduled (skipped).
-  const scanStart = earliestStreakScanStart(medications, todayKey);
+  let earliestOrphanKey: string | null = null;
+  for (const dKey of orphansByDate.keys()) {
+    earliestOrphanKey = earlierKey(earliestOrphanKey, dKey);
+  }
+  const scanStart = earlierKey(earliestStreakScanStart(medications, todayKey), earliestOrphanKey);
   let currentStreakDays = 0;
   let bestStreakDays = 0;
   let runningStreak = 0;
@@ -144,7 +216,7 @@ export function computeAdherenceAnalytics(
     const lookbackDays = Math.min(diffDaysBetweenKeys(scanStart, todayKey), MAX_STREAK_LOOKBACK_DAYS);
     for (let offset = -lookbackDays; offset <= 0; offset += 1) {
       const dKey = addDaysToKey(todayKey, offset);
-      const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
+      const doses = dosesForDate(dKey);
       if (doses.length === 0) {
         // No scheduled doses: neither breaks nor extends. When today itself is
         // empty, the current streak is yesterday's running streak (not zero).
@@ -154,10 +226,8 @@ export function computeAdherenceAnalytics(
         continue;
       }
 
-      const allHandledWithoutMiss = doses.every(
-        (d) => d.effectiveStatus === 'taken' || d.effectiveStatus === 'skipped',
-      );
-      const anyTaken = doses.some((d) => d.effectiveStatus === 'taken');
+      const allHandledWithoutMiss = doses.every((d) => d.status === 'taken' || d.status === 'skipped');
+      const anyTaken = doses.some((d) => d.status === 'taken');
 
       if (offset === 0) {
         // If today is already 100% complete, include today in streak; if still in progress with no missed doses, keep yesterday's streak

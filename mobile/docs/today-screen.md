@@ -66,5 +66,8 @@ skip. Failures (e.g. web) are ignored.
 - Undo of a take (or changing it to skipped / pending) refunds the units
   recorded on the log (`unitsTaken`, COR-96); logs from before that fix fall
   back to the slot's current dose, or 1 unit.
+- Removing a dose time (or deleting a medication) hides it from Today at once;
+  its logs up to today stay as history in the streak and adherence figures
+  via their `slotSnapshot` (COR-93).
 - Not run on a device yet (COR-91). Gestures, haptics and
   the ring animation are type-checked only.

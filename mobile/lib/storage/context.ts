@@ -1,6 +1,8 @@
 import type { CipherPort, SecureKeyStore, SqlDriver } from './ports';
 import type { MedicationRow, TimeSlotRow, DoseLogRow, UserPreferenceRow, SchemaVersionRecord } from './schema';
 import { CURRENT_DATABASE_SCHEMA_VERSION, DATABASE_NAME, DDL_STATEMENTS } from './schema';
+import type { DoseSlotSnapshot, TimeSlot } from '../domain/medication-data';
+import { isDoseSlotSnapshot, toDateKey, toDoseSlotSnapshot } from '../domain/medication-data';
 
 export const VAULT_KEY_ID = 'cadencerx.vault.key.v1';
 export const VAULT_KEYSTORE_SERVICE = 'app.cadencerx.vault';
@@ -244,15 +246,21 @@ async function decryptTimeSlotRow(
   return { ...row, label: phi.label };
 }
 
+type DoseLogPhi = { note?: string | null; unitsTaken?: number | null; slotSnapshot?: DoseSlotSnapshot | null };
+
 async function encryptDoseLogRow(
   cipher: CipherPort,
   key: Uint8Array,
-  row: DoseLogRow & { note?: string | null; unitsTaken?: number | null },
+  row: DoseLogRow & DoseLogPhi,
 ): Promise<DoseLogRow> {
-  const { note: _note, unitsTaken: _units, ...plain } = row;
+  const { note: _note, unitsTaken: _units, slotSnapshot: _snapshot, ...plain } = row;
   return {
     ...plain,
-    enc_payload: await sealJson(cipher, key, { note: row.note ?? null, unitsTaken: row.unitsTaken ?? null }),
+    enc_payload: await sealJson(cipher, key, {
+      note: row.note ?? null,
+      unitsTaken: row.unitsTaken ?? null,
+      slotSnapshot: row.slotSnapshot ?? null,
+    }),
   };
 }
 
@@ -260,17 +268,52 @@ async function decryptDoseLogRow(
   cipher: CipherPort,
   key: Uint8Array,
   row: DoseLogRow,
-): Promise<DoseLogRow & { note?: string | null; unitsTaken: number | null }> {
-  const phi = await openJson<{ note?: string | null; unitsTaken?: unknown }>(cipher, key, row.enc_payload);
+): Promise<DoseLogRow & { note?: string | null; unitsTaken: number | null; slotSnapshot: DoseSlotSnapshot | null }> {
+  const phi = await openJson<{ note?: string | null; unitsTaken?: unknown; slotSnapshot?: unknown }>(cipher, key, row.enc_payload);
   // Payload is untrusted: only a finite positive number counts. Logs written before
   // COR-96 have no unitsTaken and fall back to the slot's current dose (see refundUnits).
   const units = typeof phi.unitsTaken === 'number' && Number.isFinite(phi.unitsTaken) && phi.unitsTaken > 0 ? phi.unitsTaken : null;
-  return { ...row, note: phi.note ?? null, unitsTaken: units };
+  // Logs written before COR-93 have no snapshot; malformed ones are dropped the same way.
+  const slotSnapshot = isDoseSlotSnapshot(phi.slotSnapshot)
+    ? { time: phi.slotSnapshot.time, label: phi.slotSnapshot.label, doseUnits: phi.slotSnapshot.doseUnits }
+    : null;
+  return { ...row, note: phi.note ?? null, unitsTaken: units, slotSnapshot };
 }
 
-/** Units to give back when a taken log is undone or changed (COR-96). */
-function refundUnits(storedUnits: number | null | undefined, currentSlotDoseUnits: number | undefined): number {
-  return storedUnits ?? currentSlotDoseUnits ?? 1;
+/** Domain entry for a stored log row (shared by every dose-log reader). */
+function toDoseLogEntry(
+  row: DoseLogRow,
+  decrypted: { note?: string | null; slotSnapshot: DoseSlotSnapshot | null },
+): import('../domain/medication-data').DoseLogEntry {
+  return {
+    id: row.id,
+    key: row.id,
+    dateKey: row.date_key,
+    medicationId: row.medication_id,
+    slotId: row.slot_id,
+    status: row.status,
+    loggedAt: row.logged_at,
+    note: decrypted.note || undefined,
+    ...(decrypted.slotSnapshot ? { slotSnapshot: decrypted.slotSnapshot } : {}),
+  };
+}
+
+/** Snapshot to store on a log: the live slot, else whatever the log already carried (COR-93). */
+function slotSnapshotFor(slot: TimeSlot | undefined, fallback: DoseSlotSnapshot | null | undefined): DoseSlotSnapshot | null {
+  return slot ? toDoseSlotSnapshot(slot) : (fallback ?? null);
+}
+
+/**
+ * Units to give back when a taken log is undone or changed (COR-96). Without a
+ * recorded amount, use the slot's current dose, then the dose in the log's
+ * snapshot (slot removed, COR-93), then 1.
+ */
+function refundUnits(
+  storedUnits: number | null | undefined,
+  currentSlotDoseUnits: number | undefined,
+  snapshotDoseUnits?: number,
+): number {
+  return storedUnits ?? currentSlotDoseUnits ?? snapshotDoseUnits ?? 1;
 }
 
 async function encryptPreferenceRow(
@@ -534,8 +577,15 @@ export class MedicationRepository {
       }
 
       if (staleSlotIds && staleSlotIds.length > 0) {
+        // COR-93: past and today's logs for a removed slot are kept as history (they carry a
+        // slotSnapshot); only logs dated after today are dropped, as nothing can still happen there.
+        const todayKey = toDateKey(new Date());
         for (const id of staleSlotIds) {
           await this.platform.driver.run('DELETE FROM time_slots WHERE id = ?', [id]);
+          await this.platform.driver.run(
+            'DELETE FROM dose_logs WHERE medication_id = ? AND slot_id = ? AND date_key > ?',
+            [medicationRow.id, id, todayKey],
+          );
         }
       }
     }
@@ -626,9 +676,15 @@ export class MedicationRepository {
     return med;
   }
 
+  /**
+   * Deletes a medication and its slots. Its dose logs up to today are kept as
+   * history (COR-93: readable via the log readers, counted by analytics through
+   * their slotSnapshot); logs dated after today are removed.
+   */
   public async deleteMedication(id: string): Promise<void> {
     await this.ensureReady();
     await this.platform.driver.transaction(async () => {
+      await this.platform.driver.run('DELETE FROM dose_logs WHERE medication_id = ? AND date_key > ?', [id, toDateKey(new Date())]);
       await this.platform.driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
       await this.platform.driver.run('DELETE FROM medications WHERE id = ?', [id]);
     });
@@ -666,17 +722,7 @@ export class MedicationRepository {
     const rows = await this.platform.driver.all<DoseLogRow>('SELECT * FROM dose_logs ORDER BY date_key ASC, logged_at ASC');
     const logs: import('../domain/medication-data').DoseLogMap = {};
     for (const row of rows) {
-      const decrypted = await decryptDoseLogRow(this.platform.cipher, key, row);
-      logs[row.id] = {
-        id: row.id,
-        key: row.id,
-        dateKey: row.date_key,
-        medicationId: row.medication_id,
-        slotId: row.slot_id,
-        status: row.status,
-        loggedAt: row.logged_at,
-        note: decrypted.note || undefined,
-      };
+      logs[row.id] = toDoseLogEntry(row, await decryptDoseLogRow(this.platform.cipher, key, row));
     }
     return logs;
   }
@@ -694,17 +740,7 @@ export class MedicationRepository {
     );
     const logs: import('../domain/medication-data').DoseLogEntry[] = [];
     for (const row of rows) {
-      const decrypted = await decryptDoseLogRow(this.platform.cipher, key, row);
-      logs.push({
-        id: row.id,
-        key: row.id,
-        dateKey: row.date_key,
-        medicationId: row.medication_id,
-        slotId: row.slot_id,
-        status: row.status,
-        loggedAt: row.logged_at,
-        note: decrypted.note || undefined,
-      });
+      logs.push(toDoseLogEntry(row, await decryptDoseLogRow(this.platform.cipher, key, row)));
     }
     return logs;
   }
@@ -724,9 +760,9 @@ export class MedicationRepository {
     await this.ensureReady();
     const { domainMedicationToRows } = await import('./mappers');
     const { buildDoseKey } = await import('../domain/medication-data');
-    const doseUnitsBySlot = new Map<string, number>();
+    const slotsByKey = new Map<string, TimeSlot>();
     for (const med of medications) {
-      for (const slot of med.timeSlots) doseUnitsBySlot.set(`${med.id}:${slot.id}`, slot.doseUnits);
+      for (const slot of med.timeSlots) slotsByKey.set(`${med.id}:${slot.id}`, slot);
     }
     await this.platform.driver.runExclusive(async () => {
       const key = await this.getKey();
@@ -737,6 +773,8 @@ export class MedicationRepository {
         }
         const stamp = nowIso();
         for (const log of logs) {
+          const slot = slotsByKey.get(`${log.medicationId}:${log.slotId}`);
+          const slotSnapshot = slotSnapshotFor(slot, isDoseSlotSnapshot(log.slotSnapshot) ? log.slotSnapshot : null);
           const encrypted = await encryptDoseLogRow(this.platform.cipher, key, {
             id: buildDoseKey(log.dateKey, log.medicationId, log.slotId),
             date_key: log.dateKey,
@@ -748,7 +786,8 @@ export class MedicationRepository {
             updated_at: stamp,
             enc_payload: '',
             note: log.note ?? null,
-            unitsTaken: log.status === 'taken' ? (doseUnitsBySlot.get(`${log.medicationId}:${log.slotId}`) ?? 1) : null,
+            unitsTaken: log.status === 'taken' ? (slotSnapshot?.doseUnits ?? 1) : null,
+            slotSnapshot,
           });
           await this.platform.driver.run(
             `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
@@ -772,7 +811,7 @@ export class MedicationRepository {
     });
   }
 
-  public async getDoseLogsByDate(dateKey: string) {
+  public async getDoseLogsByDate(dateKey: string): Promise<import('../domain/medication-data').DoseLogEntry[]> {
     await this.ensureReady();
     const key = await this.getKey();
     const rows = await this.platform.driver.all<DoseLogRow>(
@@ -780,19 +819,7 @@ export class MedicationRepository {
       [dateKey],
     );
     return Promise.all(
-      rows.map(async (row) => {
-        const decrypted = await decryptDoseLogRow(this.platform.cipher, key, row);
-        return {
-          id: row.id,
-          key: row.id,
-          dateKey: row.date_key,
-          medicationId: row.medication_id,
-          slotId: row.slot_id,
-          status: row.status,
-          loggedAt: row.logged_at,
-          note: decrypted.note || undefined,
-        };
-      }),
+      rows.map(async (row) => toDoseLogEntry(row, await decryptDoseLogRow(this.platform.cipher, key, row))),
     );
   }
 
@@ -819,13 +846,17 @@ export class MedicationRepository {
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
       const doseUnits = slot?.doseUnits ?? 1;
       const wasTaken = existing?.status === 'taken';
-      const existingUnits = existing ? (await decryptDoseLogRow(this.platform.cipher, key, existing)).unitsTaken : null;
+      const existingPhi = existing ? await decryptDoseLogRow(this.platform.cipher, key, existing) : null;
+      const existingUnits = existingPhi?.unitsTaken ?? null;
+      const existingSnapshot = existingPhi?.slotSnapshot ?? null;
+      const slotSnapshot = slotSnapshotFor(slot, existingSnapshot);
+      const refund = refundUnits(existingUnits, slot?.doseUnits, existingSnapshot?.doseUnits);
       // Re-marking a taken dose keeps what was originally deducted.
-      const unitsTaken = willBeTaken ? (wasTaken ? refundUnits(existingUnits, slot?.doseUnits) : doseUnits) : null;
+      const unitsTaken = willBeTaken ? (wasTaken ? refund : doseUnits) : null;
 
       let updatedMedication = medication ?? undefined;
       await this.platform.driver.transaction(async () => {
-        const logRow: DoseLogRow & { note?: string | null; unitsTaken?: number | null } = {
+        const logRow: DoseLogRow & DoseLogPhi = {
           id: doseKey,
           date_key: dateKey,
           medication_id: medicationId,
@@ -837,6 +868,7 @@ export class MedicationRepository {
           enc_payload: '',
           note: note ?? null,
           unitsTaken,
+          slotSnapshot,
         };
         const encrypted = await encryptDoseLogRow(this.platform.cipher, key, logRow);
         await this.platform.driver.run(
@@ -857,7 +889,7 @@ export class MedicationRepository {
         );
 
         if (medication && wasTaken !== willBeTaken) {
-          const delta = willBeTaken ? -doseUnits : refundUnits(existingUnits, slot?.doseUnits);
+          const delta = willBeTaken ? -doseUnits : refund;
           const current = await this.getMedicationRow(medicationId);
           if (current) {
             await this.platform.driver.run(
@@ -881,6 +913,7 @@ export class MedicationRepository {
         status,
         loggedAt: stamp,
         note,
+        ...(slotSnapshot ? { slotSnapshot } : {}),
       };
       return { log, updatedMedication };
     });
@@ -895,9 +928,9 @@ export class MedicationRepository {
       const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
       const medication = await this.getMedicationById(medicationId);
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
-      const storedUnits =
-        existing?.status === 'taken' ? (await decryptDoseLogRow(this.platform.cipher, await this.getKey(), existing)).unitsTaken : null;
-      const doseUnits = refundUnits(storedUnits, slot?.doseUnits);
+      const stored =
+        existing?.status === 'taken' ? await decryptDoseLogRow(this.platform.cipher, await this.getKey(), existing) : null;
+      const doseUnits = refundUnits(stored?.unitsTaken, slot?.doseUnits, stored?.slotSnapshot?.doseUnits);
 
       await this.platform.driver.transaction(async () => {
         await this.platform.driver.run('DELETE FROM dose_logs WHERE id = ?', [doseKey]);
@@ -943,7 +976,10 @@ export class MedicationRepository {
       await this.ensureReady();
       const key = await this.getKey();
       const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
-      const logRow: DoseLogRow & { note?: string | null } = {
+      const medication = await this.getMedicationById(medicationId);
+      const slot = medication?.timeSlots.find((item) => item.id === slotId);
+      const existingSnapshot = existing ? (await decryptDoseLogRow(this.platform.cipher, key, existing)).slotSnapshot : null;
+      const logRow: DoseLogRow & DoseLogPhi = {
         id: doseKey,
         date_key: dateKey,
         medication_id: medicationId,
@@ -954,6 +990,7 @@ export class MedicationRepository {
         updated_at: nowIso(),
         enc_payload: '',
         note: note ?? null,
+        slotSnapshot: slotSnapshotFor(slot, existingSnapshot),
       };
       const encrypted = await encryptDoseLogRow(this.platform.cipher, key, logRow);
       await this.platform.driver.run(

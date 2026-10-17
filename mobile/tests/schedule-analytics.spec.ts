@@ -6,7 +6,7 @@
  * day cases that the old fixed -45..0 window could not represent.
  */
 import { describe, expect, it } from 'vitest';
-import type { DoseLogMap, Medication } from '../lib/domain/medication-data';
+import type { DoseLogEntry, DoseLogMap, Medication, TimeOfDayBlock } from '../lib/domain/medication-data';
 import { addDaysToKey } from '../lib/schedule/date-keys';
 import { computeAdherenceAnalytics, MAX_STREAK_LOOKBACK_DAYS } from '../lib/schedule/analytics';
 
@@ -345,5 +345,101 @@ describe('streak scan start', () => {
     const summary = computeAdherenceAnalytics([med], logs, TODAY);
     expect(summary.currentStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
     expect(summary.bestStreakDays).toBe(MAX_STREAK_LOOKBACK_DAYS);
+  });
+});
+
+/** A COR-93 log whose slot carries a stored snapshot. */
+function orphan(
+  offset: number,
+  medicationId: string,
+  slotId: string,
+  status: DoseLogEntry['status'],
+  label: TimeOfDayBlock = 'Evening',
+): DoseLogMap {
+  const dateKey = addDaysToKey(TODAY, offset);
+  const key = `${dateKey}_${medicationId}_${slotId}`;
+  return {
+    [key]: { key, dateKey, medicationId, slotId, status, loggedAt: '18:00', slotSnapshot: { time: '18:00', label, doseUnits: 1 } },
+  };
+}
+
+describe('orphan logs (COR-93)', () => {
+  it('counts logs of a removed slot under their snapshot label and in the medication', () => {
+    const med = makeMedication();
+    const logs = {
+      ...seedHistory([med]),
+      ...orphan(-3, 'med-1', 'slot-gone', 'missed'),
+      ...orphan(-2, 'med-1', 'slot-gone', 'skipped'),
+      ...orphan(-1, 'med-1', 'slot-gone', 'taken'),
+      ...orphan(0, 'med-1', 'slot-gone', 'taken'),
+    };
+    const summary = computeAdherenceAnalytics([med], logs, TODAY);
+    expect(summary.totalScheduled30d).toBe(33);
+    expect(summary.totalTaken30d).toBe(31);
+    expect(summary.totalSkipped30d).toBe(1);
+    expect(summary.totalMissed30d).toBe(1);
+    expect(summary.byTimeOfDay.Evening).toEqual({ taken: 2, total: 4, pct: 50 });
+    expect(summary.byTimeOfDay.Morning).toEqual({ taken: 29, total: 29, pct: 100 });
+    expect(summary.byMedication[0]).toMatchObject({ taken: 31, total: 33 });
+    // The missed orphan on -3 breaks the run; -2 and -1 rebuild it; today's slot-a is still pending.
+    expect(summary.bestStreakDays).toBe(26);
+    expect(summary.currentStreakDays).toBe(2);
+  });
+
+  it('counts a deleted medication in totals, blocks and streaks but not byMedication', () => {
+    const logs = {
+      ...orphan(-2, 'med-gone', 'slot-a', 'taken', 'Morning'),
+      ...orphan(-1, 'med-gone', 'slot-a', 'taken', 'Morning'),
+      ...orphan(-1, 'med-gone', 'slot-b', 'skipped', 'Bedtime'),
+      ...orphan(0, 'med-gone', 'slot-a', 'taken', 'Morning'),
+    };
+    const summary = computeAdherenceAnalytics([], logs, TODAY);
+    expect(summary.byMedication).toEqual([]);
+    expect(summary).toMatchObject({ totalScheduled30d: 4, totalTaken30d: 3, totalSkipped30d: 1, totalMissed30d: 0 });
+    expect(summary.byTimeOfDay.Morning).toEqual({ taken: 3, total: 3, pct: 100 });
+    expect(summary.byTimeOfDay.Bedtime).toEqual({ taken: 0, total: 1, pct: 0 });
+    expect(summary.currentStreakDays).toBe(3);
+    expect(summary.bestStreakDays).toBe(3);
+  });
+
+  it('lets an orphan dated before every startDate move the streak scan start', () => {
+    const live = makeMedication({ startDate: addDaysToKey(TODAY, -1) });
+    const logs = {
+      ...orphan(-5, 'med-gone', 'slot-a', 'taken', 'Midday'),
+      ...orphan(0, 'med-gone', 'slot-a', 'taken', 'Midday'),
+      [`${addDaysToKey(TODAY, -1)}_med-1_slot-a`]: {
+        key: `${addDaysToKey(TODAY, -1)}_med-1_slot-a`,
+        dateKey: addDaysToKey(TODAY, -1),
+        medicationId: 'med-1',
+        slotId: 'slot-a',
+        status: 'taken' as const,
+        loggedAt: '08:00',
+      },
+    };
+    const summary = computeAdherenceAnalytics([live], logs, TODAY);
+    expect(summary).toMatchObject({ totalScheduled30d: 3, totalTaken30d: 3 });
+    expect(summary.byTimeOfDay.Midday).toEqual({ taken: 2, total: 2, pct: 100 });
+    expect(summary.byMedication[0]).toMatchObject({ taken: 1, total: 1 });
+    // -5 (orphan) and -1 (live) extend; the empty days between neither break nor extend.
+    expect(summary.currentStreakDays).toBe(2);
+    expect(summary.bestStreakDays).toBe(2);
+  });
+
+  it('ignores pre-COR-93 orphans, future and invalid dates, paused medications and live slots', () => {
+    const med = makeMedication();
+    const paused = makeMedication({ id: 'med-paused', active: false });
+    const base = seedHistory([med]);
+    const legacyKey = `${addDaysToKey(TODAY, -1)}_med-1_slot-gone`;
+    const liveKey = `${addDaysToKey(TODAY, -1)}_med-1_slot-a`;
+    const noise: DoseLogMap = {
+      [legacyKey]: { key: legacyKey, dateKey: addDaysToKey(TODAY, -1), medicationId: 'med-1', slotId: 'slot-gone', status: 'taken', loggedAt: '18:00' },
+      ...orphan(1, 'med-1', 'slot-gone', 'taken'),
+      ...orphan(-1, 'med-paused', 'slot-gone', 'taken'),
+      'bad_med-1_slot-gone': { ...Object.values(orphan(-1, 'med-1', 'slot-gone', 'taken'))[0], key: 'bad', dateKey: 'not-a-date' },
+      [liveKey]: { ...base[liveKey], slotSnapshot: { time: '08:00', label: 'Morning', doseUnits: 1 } },
+    };
+    expect(computeAdherenceAnalytics([med, paused], { ...base, ...noise }, TODAY)).toEqual(
+      computeAdherenceAnalytics([med, paused], base, TODAY),
+    );
   });
 });

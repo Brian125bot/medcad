@@ -9,6 +9,10 @@
  * (the web module keeps its fixed -45..0 scan and "60 days" comment; it is
  * out of scope and intentionally untouched).
  *
+ * The web module also predates COR-93 orphan logs (logs carrying a
+ * `slotSnapshot` whose slot or medication is gone); the matrix uses none, so
+ * outputs stay identical. Orphan counting is covered in the analytics spec.
+ *
  * Histories of 46 days or fewer must match the web implementation exactly;
  * longer histories assert both sides explicitly.
  *

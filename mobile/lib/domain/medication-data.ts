@@ -91,6 +91,39 @@ export interface Medication {
 
 export type DoseStatus = 'taken' | 'skipped' | 'missed';
 
+const TIME_OF_DAY_LABELS: readonly TimeOfDayBlock[] = ['Morning', 'Midday', 'Evening', 'Bedtime'];
+const SLOT_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * The slot as it was when the dose was logged (COR-93). Stored inside the
+ * log's encrypted payload so history stays renderable after the slot (or its
+ * medication) is removed. Absent on logs written before COR-93.
+ */
+export interface DoseSlotSnapshot {
+  time: string; // "HH:mm"
+  label: TimeOfDayBlock;
+  doseUnits: number;
+}
+
+/** Strict runtime check for untrusted (stored or decoded) slot snapshots. */
+export function isDoseSlotSnapshot(value: unknown): value is DoseSlotSnapshot {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.time === 'string' &&
+    SLOT_TIME_PATTERN.test(v.time) &&
+    typeof v.label === 'string' &&
+    (TIME_OF_DAY_LABELS as readonly string[]).includes(v.label) &&
+    typeof v.doseUnits === 'number' &&
+    Number.isFinite(v.doseUnits) &&
+    v.doseUnits > 0
+  );
+}
+
+export function toDoseSlotSnapshot(slot: TimeSlot): DoseSlotSnapshot {
+  return { time: slot.time, label: slot.label, doseUnits: slot.doseUnits };
+}
+
 export interface DoseLogEntry {
   key: string; // `${dateKey}_${medicationId}_${slotId}`
   dateKey: string; // YYYY-MM-DD
@@ -100,6 +133,7 @@ export interface DoseLogEntry {
   loggedAt: string; // HH:mm
   note?: string;
   id?: string; // Optional alias for key
+  slotSnapshot?: DoseSlotSnapshot; // COR-93: the slot at logging time
 }
 
 export type DoseLogMap = Record<string, DoseLogEntry>;
@@ -301,6 +335,40 @@ export interface AdherenceAnalyticsSummary {
   }>;
 }
 
+interface CountedDose {
+  label: TimeOfDayBlock;
+  status: DoseStatus | 'pending';
+  medicationId: string | null; // null when the medication was deleted
+}
+
+/**
+ * COR-93 orphan logs (slot removed or medication deleted) dated on or before
+ * `todayKey`, grouped by date. Mirrors `lib/schedule/analytics.ts`: logs
+ * without a `slotSnapshot` and orphans of paused medications are ignored.
+ */
+function collectOrphanDoses(
+  medications: Medication[],
+  logs: DoseLogMap,
+  todayKey: string
+): Map<string, CountedDose[]> {
+  const medsById = new Map(medications.map((med) => [med.id, med]));
+  const byDate = new Map<string, CountedDose[]>();
+  for (const log of Object.values(logs)) {
+    if (!log.slotSnapshot || diffDaysBetweenKeys(log.dateKey, todayKey) < 0) continue;
+    const med = medsById.get(log.medicationId);
+    if (med && (!med.active || med.timeSlots.some((slot) => slot.id === log.slotId))) continue;
+    const dose: CountedDose = {
+      label: log.slotSnapshot.label,
+      status: log.status,
+      medicationId: med ? med.id : null,
+    };
+    const day = byDate.get(log.dateKey);
+    if (day) day.push(dose);
+    else byDate.set(log.dateKey, [dose]);
+  }
+  return byDate;
+}
+
 export function computeAdherenceAnalytics(
   medications: Medication[],
   logs: DoseLogMap,
@@ -329,33 +397,46 @@ export function computeAdherenceAnalytics(
     medCounter[med.id] = {taken: 0, total: 0};
   }
 
+  const orphansByDate = collectOrphanDoses(medications, logs, todayKey);
+  const dosesForDate = (dKey: string): CountedDose[] => {
+    const scheduled = getScheduledDosesForDate(medications, logs, dKey, todayKey).map(
+      (d): CountedDose => ({
+        label: d.slot.label,
+        status: d.effectiveStatus,
+        medicationId: d.medication.id,
+      })
+    );
+    return scheduled.concat(orphansByDate.get(dKey) ?? []);
+  };
+
   // Evaluate past 30 days (including today for completed logs, or past 29 days + today)
   for (let offset = -29; offset <= 0; offset++) {
     const dKey = addDaysToKey(todayKey, offset);
-    const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
+    const doses = dosesForDate(dKey);
     for (const d of doses) {
       // On today, only count doses that have already been logged so pending evening doses don't penalize 30d rate
-      if (offset === 0 && d.effectiveStatus === 'pending') {
+      if (offset === 0 && d.status === 'pending') {
         continue;
       }
       totalScheduled30d++;
       if (offset >= -6) totalScheduled7d++;
 
-      byTimeOfDay[d.slot.label].total++;
-      if (medCounter[d.medication.id]) {
-        medCounter[d.medication.id].total++;
+      byTimeOfDay[d.label].total++;
+      const counter = d.medicationId === null ? undefined : medCounter[d.medicationId];
+      if (counter) {
+        counter.total++;
       }
 
-      if (d.effectiveStatus === 'taken') {
+      if (d.status === 'taken') {
         totalTaken30d++;
         if (offset >= -6) totalTaken7d++;
-        byTimeOfDay[d.slot.label].taken++;
-        if (medCounter[d.medication.id]) {
-          medCounter[d.medication.id].taken++;
+        byTimeOfDay[d.label].taken++;
+        if (counter) {
+          counter.taken++;
         }
-      } else if (d.effectiveStatus === 'skipped') {
+      } else if (d.status === 'skipped') {
         totalSkipped30d++;
-      } else if (d.effectiveStatus === 'missed') {
+      } else if (d.status === 'missed') {
         totalMissed30d++;
       }
     }
@@ -376,13 +457,13 @@ export function computeAdherenceAnalytics(
 
   for (let offset = -45; offset <= 0; offset++) {
     const dKey = addDaysToKey(todayKey, offset);
-    const doses = getScheduledDosesForDate(medications, logs, dKey, todayKey);
+    const doses = dosesForDate(dKey);
     if (doses.length === 0) continue;
 
     const allHandledWithoutMiss = doses.every(
-      (d) => d.effectiveStatus === 'taken' || d.effectiveStatus === 'skipped'
+      (d) => d.status === 'taken' || d.status === 'skipped'
     );
-    const anyTaken = doses.some((d) => d.effectiveStatus === 'taken');
+    const anyTaken = doses.some((d) => d.status === 'taken');
 
     if (offset === 0) {
       // If today is already 100% complete, include today in streak; if still in progress with no missed doses, keep yesterday's streak
