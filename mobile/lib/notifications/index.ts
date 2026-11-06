@@ -3,7 +3,6 @@
  * `ensureReminderPermission`, `getReminderStatus`/`subscribeReminderStatus`
  * (via `useReminderStatus`) and the settings openers; they never schedule.
  */
-import './background-task';
 import { Alert, AppState, Linking, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
