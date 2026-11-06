@@ -101,9 +101,21 @@ export function buildReminderContent(
   };
 }
 
-/** FNV-1a (32-bit) over the fields that reach the OS. Stable across runs and platforms. */
-export function hashReminderContent(content: Pick<ReminderContent, 'title' | 'body' | 'data' | 'channelId'>): string {
-  const input = JSON.stringify([content.title, content.body, content.data, content.channelId]);
+/**
+ * FNV-1a (32-bit) over the fields that reach the OS. Stable across runs and
+ * platforms. `categoryIdentifier` is included (null when absent) so a category
+ * change, including dropping actions from a sentinel, rewrites the entry once.
+ */
+export function hashReminderContent(
+  content: Pick<ReminderContent, 'title' | 'body' | 'data' | 'channelId' | 'categoryIdentifier'>,
+): string {
+  const input = JSON.stringify([
+    content.title,
+    content.body,
+    content.data,
+    content.channelId,
+    content.categoryIdentifier ?? null,
+  ]);
   let hash = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
     hash ^= input.charCodeAt(i);

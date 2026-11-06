@@ -19,7 +19,7 @@ import { PREF_EXACT_ALARM_PROMPTED } from '../lib/notifications/exact-alarm';
 import { PREF_HANDLED_ACTION_RESPONSES } from '../lib/notifications/response-dedupe';
 import { PREF_SHOW_MEDICATION_NAMES } from '../lib/notifications/settings';
 import type { CivilNow } from '../lib/notifications/types';
-import { SNOOZE_NAMESPACE } from '../lib/notifications/types';
+import { DOSE_NAMESPACE, SNOOZE_NAMESPACE } from '../lib/notifications/types';
 import type { RepositoryListener } from '../lib/storage/context';
 import { buildDoseKey } from '../lib/schedule/doses';
 import { makeMed } from './notification-fixtures';
@@ -310,6 +310,27 @@ describe('ReminderEngine.reconcile', () => {
     await engine.reconcile();
     expect(scheduler.calls).toEqual([]);
     expect(engine.getStatus()).toEqual({ state: 'permission-denied', lastReconciledAt: '2026-10-16T12:00:00.000Z', scheduledCount: 0, truncated: false });
+  });
+
+  it('cancels cx.dose.* when permission is revoked after a schedule', async () => {
+    const { engine, scheduler, permissions } = setup();
+    await engine.reconcile();
+    const doseIds = [...scheduler.scheduled.keys()].filter((id) => id.startsWith(DOSE_NAMESPACE));
+    expect(doseIds.length).toBeGreaterThan(0);
+    const snoozeId = `${SNOOZE_NAMESPACE}2026-10-16.0815`;
+    scheduler.scheduled.set(snoozeId, {
+      id: snoozeId,
+      fireAtMs: Date.UTC(2026, 9, 16, 8, 15),
+      contentHash: null,
+      exact: true,
+      doseKeys: ['2026-10-16_med-a_slot-am'],
+    });
+    permissions.status = 'denied';
+    await engine.reconcile();
+    expect([...scheduler.scheduled.keys()].filter((id) => id.startsWith(DOSE_NAMESPACE))).toEqual([]);
+    expect(scheduler.scheduled.has(snoozeId)).toBe(true);
+    expect(scheduler.calls.filter((call) => call.startsWith('cancel ')).every((call) => call.includes(DOSE_NAMESPACE))).toBe(true);
+    expect(engine.getStatus()).toMatchObject({ state: 'permission-denied', scheduledCount: 0, truncated: false });
   });
 
   it('reports exact-alarm denial and truncation', async () => {

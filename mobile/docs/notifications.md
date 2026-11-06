@@ -148,13 +148,18 @@ Regimen tab → bell → **Reminders** (`app/reminder-settings.tsx`):
 
 `useReminderStatus()` → `{ state: 'ok' | 'permission-denied' |
 'exact-alarm-denied' | 'error', lastReconciledAt, scheduledCount, truncated }`.
-Permission denied schedules nothing; scheduler errors are logged (no PHI) and
-retried on the next trigger.
+Permission denied cancels every already scheduled `cx.dose.*` entry and
+schedules nothing (`scheduledCount: 0`). `cx.snooze.*` is not part of that
+cancel. Scheduler errors are logged (no PHI) and retried on the next trigger.
 
 ## Interactive actions (COR-77)
 
-Category **`dose_reminder`** (Expo disallows `:` / `-` in category ids) registers
-three actions on every `cx.dose.` and `cx.snooze.` reminder:
+Category **`dose_reminder`** (Expo disallows `:` / `-` in category ids) is set
+only on dose-group reminders and on `cx.snooze.` follow-ups. Sentinel and
+window-end reminders omit `categoryIdentifier`, so they do not show Take /
+Snooze / Skip. `hashReminderContent` includes the category (null when absent),
+so a category change rewrites an already-scheduled entry on the next reconcile.
+The category registers three actions:
 
 | Action id | Label | Effect |
 | --- | --- | --- |
