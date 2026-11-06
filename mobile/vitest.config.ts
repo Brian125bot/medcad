@@ -17,6 +17,7 @@ export default defineConfig({
         'lib/storage/device-benchmark.ts',
         'lib/storage/diagnostics.ts',
         'lib/notifications/**/*.ts',
+        'lib/calendar/**/*.ts',
       ],
       // Expo adapters and the wiring index are device-only, like lib/storage/expo-*.ts.
       // Vitest's default exclude drops any `*-benchmark.ts` file (it matches its
@@ -28,6 +29,9 @@ export default defineConfig({
         'lib/notifications/ports.ts',
         'lib/notifications/background-task.ts',
         'lib/notifications/notification-response.ts',
+        'lib/calendar/expo-*.ts',
+        'lib/calendar/index.ts',
+        'lib/calendar/ports.ts',
       ],
       thresholds: {
         lines: 100,

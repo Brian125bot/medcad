@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { startCalendarSyncEngine } from "@/lib/calendar";
 import { startReminderEngine } from "@/lib/notifications";
 import { getStorageContext } from "@/lib/storage";
 
@@ -46,6 +47,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (!ready) return;
     let stop: (() => void) | undefined;
+    let stopCalendar: (() => void) | undefined;
     let cancelled = false;
     getStorageContext()
       .then((context) => {
@@ -54,12 +56,14 @@ export default function RootLayout() {
             onOpenToday: () => router.navigate("/today"),
             onOpenCabinet: () => router.navigate("/cabinet"),
           });
+          stopCalendar = startCalendarSyncEngine(context);
         }
       })
       .catch((startError) => console.warn("Reminder engine failed to start:", startError));
     return () => {
       cancelled = true;
       stop?.();
+      stopCalendar?.();
     };
   }, [ready]);
 
