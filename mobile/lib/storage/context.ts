@@ -189,6 +189,7 @@ async function encryptMedicationRow(
     (row as { inventory_pharmacy_note?: string | null }).inventory_pharmacy_note ?? null;
   const appearance = (row as { appearance?: unknown }).appearance ?? null;
   const alert = (row as { alert?: unknown }).alert ?? null;
+  const calendarSyncedFillDate = (row as { calendar_synced_fill_date?: unknown }).calendar_synced_fill_date ?? null;
   const phi = {
     name: typeof name === 'string' ? name : String(name ?? ''),
     generic_name: genericName,
@@ -200,6 +201,7 @@ async function encryptMedicationRow(
     inventory_pharmacy_note: pharmacyNote,
     appearance,
     alert,
+    calendar_synced_fill_date: calendarSyncedFillDate,
   };
   return {
     id: row.id,

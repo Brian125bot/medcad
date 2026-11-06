@@ -84,3 +84,28 @@ console.log('✓ mapper appearance handling');
   }
   console.log('✓ mapper alert handling');
 }
+
+// COR-94 calendarSyncedFillDate: round-trips in the encrypted payload, absent stays absent, invalid values dropped.
+{
+  const synced = {
+    ...medication,
+    inventory: { ...medication.inventory, calendarSyncedFillDate: '2026-11-01' },
+  };
+  const rows = domainMedicationToRows(synced);
+  assert.strictEqual((rows.medicationRow as { calendar_synced_fill_date?: unknown }).calendar_synced_fill_date, '2026-11-01');
+  assert.strictEqual(rowsToDomainMedication(rows.medicationRow, rows.timeSlotRows).inventory.calendarSyncedFillDate, '2026-11-01');
+
+  const plain = domainMedicationToRows(medication);
+  assert.strictEqual((plain.medicationRow as { calendar_synced_fill_date?: unknown }).calendar_synced_fill_date, null);
+  const plainDomain = rowsToDomainMedication(plain.medicationRow, plain.timeSlotRows);
+  assert.strictEqual('calendarSyncedFillDate' in plainDomain.inventory, false);
+
+  const { calendar_synced_fill_date: _noSynced, ...preCor94Row } = plain.medicationRow;
+  assert.strictEqual('calendarSyncedFillDate' in rowsToDomainMedication(preCor94Row, plain.timeSlotRows).inventory, false);
+
+  for (const bad of [null, '', '2026-13-01', 5, {}]) {
+    const row = { ...rows.medicationRow, calendar_synced_fill_date: bad };
+    assert.strictEqual('calendarSyncedFillDate' in rowsToDomainMedication(row, rows.timeSlotRows).inventory, false);
+  }
+  console.log('✓ mapper calendarSyncedFillDate handling');
+}
