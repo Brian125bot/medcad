@@ -36,6 +36,11 @@ the issue id and PR number where there are any.
   replace device QA and it does not produce storage benchmark numbers.
 - **[mobile]** `"engines": { "node": ">=22.13" }` and `mobile/.nvmrc` (`22`).
   The storage tests need `node:sqlite`, which ships unflagged from Node 22.13.
+- **[mobile]** Calendar refill sync engine, inert until Google sign-in ships:
+  a state-driven planner for a dedicated refill calendar (generic event text by
+  default), deletion tombstones carried on `medication-deleted`, and a narrow
+  `recordCalendarSync` that writes only the two calendar fields and emits no
+  change event. See `mobile/docs/calendar-sync.md`.
 
 ### Changed
 - **[mobile]** `nextFillDate` is refreshed from the shared supply projection at

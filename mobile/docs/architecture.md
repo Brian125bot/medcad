@@ -63,6 +63,7 @@ primitives, with identical wire formats). Only three thin adapter files touch
 | `lib/storage/ports.ts` | `SqlDriver`, `CipherPort`, `SecureKeyStore`, `VaultKeyMissingError` | yes | — |
 | `lib/storage/expo-driver.ts` / `expo-cipher.ts` / `expo-keystore.ts` | The **only** adapters that import `expo-sqlite` / `expo-crypto` / `expo-secure-store` | no | — (device only) |
 | `lib/storage/index.ts` | `getStorageContext()` singleton wiring the Expo adapters | no | — |
+| `lib/calendar/*` | Calendar refill sync engine (COR-79, part 1, inert): planner, event content, fingerprint, settings, typed errors, `CalendarSyncEngine`. Screens import only `lib/calendar/index.ts`; see [calendar-sync.md](calendar-sync.md) | **yes** (except `index.ts`, `expo-clock.ts`) | `calendar-*.spec.ts`, `repository-calendar.test.ts` |
 | `constants/theme.ts` | Design tokens | yes | — |
 
 ## 3. Dependency rules
@@ -173,6 +174,16 @@ adjust `inventory_current` by the slot's `doseUnits` in the same transaction.
 `undoDose` deletes the log and returns units if it had been `taken`. The Today
 screen calls both through `TodayStore`, optimistically with rollback
 ([today-screen.md](today-screen.md#actions)).
+
+### Calendar sync (COR-79, part 1)
+
+`app/_layout.tsx` calls `startCalendarSyncEngine(context)` next to the
+reminder engine. The engine subscribes to repository changes and runs after
+commit: a deletion with a linked event id becomes a tombstone, saves and the
+two calendar settings trigger a pass, doses never do. Results go through
+`recordCalendarSync`, which emits nothing. Until part 2 the auth adapter
+reports `not-configured` and no remote call is made. See
+[calendar-sync.md](calendar-sync.md).
 
 ## 6. Cross-cutting invariants
 
