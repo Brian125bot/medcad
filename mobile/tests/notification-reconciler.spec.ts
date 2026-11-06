@@ -59,7 +59,7 @@ function fakeScheduler() {
       s.calls.push('channels');
     },
     async listScheduled() {
-      return [...scheduled.values()].map(({ id, fireAtMs, contentHash }) => ({ id, fireAtMs, contentHash }));
+      return [...scheduled.values()].map(({ id, fireAtMs, contentHash, exact }) => ({ id, fireAtMs, contentHash, exact }));
     },
     async schedule(request: ReminderScheduleRequest) {
       if (s.failNext) {
@@ -67,7 +67,7 @@ function fakeScheduler() {
         throw new Error('scheduler boom');
       }
       s.calls.push(`schedule ${request.id}`);
-      scheduled.set(request.id, { id: request.id, fireAtMs: request.fireAtMs, contentHash: hashReminderContent(request.content), request });
+      scheduled.set(request.id, { id: request.id, fireAtMs: request.fireAtMs, contentHash: hashReminderContent(request.content), exact: request.exact, request });
     },
     async cancel(id: string) {
       s.calls.push(`cancel ${id}`);
@@ -183,9 +183,9 @@ describe('ReminderEngine.reconcile', () => {
 
   it('never touches foreign namespaces', async () => {
     const { engine, scheduler, repository } = setup();
-    scheduler.scheduled.set('cx.snooze.x', { id: 'cx.snooze.x', fireAtMs: 1, contentHash: null });
-    scheduler.scheduled.set('cx.refill.y', { id: 'cx.refill.y', fireAtMs: 1, contentHash: null });
-    scheduler.scheduled.set('cx.dose.stale', { id: 'cx.dose.stale', fireAtMs: 1, contentHash: null });
+    scheduler.scheduled.set('cx.snooze.x', { id: 'cx.snooze.x', fireAtMs: 1, contentHash: null, exact: null });
+    scheduler.scheduled.set('cx.refill.y', { id: 'cx.refill.y', fireAtMs: 1, contentHash: null, exact: null });
+    scheduler.scheduled.set('cx.dose.stale', { id: 'cx.dose.stale', fireAtMs: 1, contentHash: null, exact: null });
     await engine.reconcile();
     repository.medications = [];
     await engine.reconcile();
@@ -266,7 +266,7 @@ describe('ReminderEngine lifecycle', () => {
   it('vault deletion cancels only cx.dose. and does not read the vault', async () => {
     const { engine, scheduler, repository } = setup();
     await engine.reconcile();
-    scheduler.scheduled.set('cx.snooze.keep', { id: 'cx.snooze.keep', fireAtMs: 1, contentHash: null });
+    scheduler.scheduled.set('cx.snooze.keep', { id: 'cx.snooze.keep', fireAtMs: 1, contentHash: null, exact: null });
     const reads = repository.medicationReads;
     await engine.handleChange({ type: 'vault-deleted' });
     expect([...scheduler.scheduled.keys()]).toEqual(['cx.snooze.keep']);
@@ -283,5 +283,81 @@ describe('ReminderEngine lifecycle', () => {
     permissions.status = 'denied';
     await expect(engine.ensurePermission()).resolves.toBe('denied');
     expect(permissions.requests).toBe(1);
+  });
+});
+
+describe('ReminderEngine.reconcile — exact-alarm metadata', () => {
+  const scheduleCount = (s: ReturnType<typeof fakeScheduler>) => s.calls.filter((c) => c.startsWith('schedule')).length;
+  const cancelCount = (s: ReturnType<typeof fakeScheduler>) => s.calls.filter((c) => c.startsWith('cancel')).length;
+
+  it('keeps an entry only when instant, hash and exact all match', async () => {
+    const { engine, scheduler } = setup();
+    await engine.reconcile();
+    const id = 'cx.dose.2026-10-16.0800';
+    const entry = scheduler.scheduled.get(id)!;
+    expect(entry.exact).toBe(true);
+    scheduler.calls.length = 0;
+    scheduler.scheduled.set(id, { ...entry, exact: false });
+    await engine.reconcile();
+    expect(scheduler.calls.filter((c) => c.includes(id))).toHaveLength(2);
+    expect(scheduler.scheduled.get(id)!.exact).toBe(true);
+  });
+
+  it('denied then granted replaces every entry once, then is idempotent', async () => {
+    const { engine, scheduler, permissions } = setup();
+    permissions.exact = 'denied';
+    await engine.reconcile();
+    expect(engine.getStatus().state).toBe('exact-alarm-denied');
+    expect([...scheduler.scheduled.values()].every((e) => e.exact === false)).toBe(true);
+    const total = scheduler.scheduled.size;
+
+    permissions.exact = 'granted';
+    scheduler.calls.length = 0;
+    await engine.reconcile();
+    expect(engine.getStatus().state).toBe('ok');
+    expect(cancelCount(scheduler)).toBe(total);
+    expect(scheduleCount(scheduler)).toBe(total);
+    expect([...scheduler.scheduled.values()].every((e) => e.exact === true)).toBe(true);
+
+    scheduler.calls.length = 0;
+    await engine.reconcile();
+    expect(cancelCount(scheduler) + scheduleCount(scheduler)).toBe(0);
+  });
+
+  it("treats 'unknown' like exact so a missing native module causes no churn", async () => {
+    const { engine, scheduler, permissions } = setup();
+    permissions.exact = 'granted';
+    await engine.reconcile();
+    permissions.exact = 'unknown';
+    scheduler.calls.length = 0;
+    await engine.reconcile();
+    expect(cancelCount(scheduler) + scheduleCount(scheduler)).toBe(0);
+  });
+
+  it('replaces entries without metadata once', async () => {
+    const { engine, scheduler } = setup();
+    await engine.reconcile();
+    for (const [id, entry] of scheduler.scheduled) scheduler.scheduled.set(id, { ...entry, contentHash: null, exact: null });
+    const total = scheduler.scheduled.size;
+    scheduler.calls.length = 0;
+    await engine.reconcile();
+    expect(scheduleCount(scheduler)).toBe(total);
+    scheduler.calls.length = 0;
+    await engine.reconcile();
+    expect(cancelCount(scheduler) + scheduleCount(scheduler)).toBe(0);
+  });
+
+  it('a fresh engine (cold start) over entries with metadata schedules nothing', async () => {
+    const first = setup();
+    await first.engine.reconcile();
+    const coldStart = new ReminderEngine({
+      repository: first.repository,
+      scheduler: first.scheduler,
+      permissions: fakePermissions(),
+      clock: fakeClock(),
+    });
+    first.scheduler.calls.length = 0;
+    await coldStart.reconcile();
+    expect(cancelCount(first.scheduler) + scheduleCount(first.scheduler)).toBe(0);
   });
 });

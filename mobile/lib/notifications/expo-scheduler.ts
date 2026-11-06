@@ -6,7 +6,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { CHIME_SOUND_FILE, hashReminderContent, REMINDER_CHANNELS, type NotificationData } from './content';
+import { CHIME_SOUND_FILE, hashReminderContent, REMINDER_CHANNELS } from './content';
 import type {
   ExactAlarmPermission,
   NotificationPermission,
@@ -14,15 +14,12 @@ import type {
   NotificationSchedulerPort,
   ScheduledReminder,
 } from './ports';
+import { readScheduleMeta, withScheduleMeta } from './schedule-meta';
 import { DOSE_NAMESPACE } from './types';
 
 const VIBRATION_PATTERN = [0, 250, 250, 250];
 
 export function createExpoScheduler(): NotificationSchedulerPort {
-  // iOS reports a DATE trigger back as a relative time interval, so the fire
-  // instant and hash we scheduled are remembered for this process. After a
-  // cold start the first reconcile reschedules once, then stays idempotent.
-  const ledger = new Map<string, { fireAtMs: number; hash: string }>();
   let channelsReady: Promise<void> | null = null;
 
   return {
@@ -52,40 +49,32 @@ export function createExpoScheduler(): NotificationSchedulerPort {
       const requests = await Notifications.getAllScheduledNotificationsAsync();
       return requests.map((request) => {
         const trigger = (request.trigger ?? {}) as Record<string, unknown>;
-        const known = ledger.get(request.identifier);
-        const fireAtMs = trigger.type === 'date' && typeof trigger.value === 'number' ? trigger.value : (known?.fireAtMs ?? null);
-        const channelId = typeof trigger.channelId === 'string' ? trigger.channelId : null;
-        const recomputed = channelId
-          ? hashReminderContent({
-              title: request.content.title ?? '',
-              body: request.content.body ?? '',
-              data: request.content.data as unknown as NotificationData,
-              channelId,
-            })
-          : null;
-        return { id: request.identifier, fireAtMs, contentHash: known?.hash ?? recomputed };
+        // iOS reports a DATE trigger as a relative interval, so the metadata written
+        // at schedule time is the source of truth there; Android reports the epoch.
+        const meta = readScheduleMeta(request.content.data);
+        const fireAtMs = trigger.type === 'date' && typeof trigger.value === 'number' ? trigger.value : (meta?.at ?? null);
+        return { id: request.identifier, fireAtMs, contentHash: meta?.hash ?? null, exact: meta?.exact ?? null };
       });
     },
 
-    async schedule({ id, fireAtMs, content }) {
+    async schedule({ id, fireAtMs, content, exact }) {
+      const data = withScheduleMeta(content.data, { at: fireAtMs, hash: hashReminderContent(content), exact });
       await Notifications.scheduleNotificationAsync({
         identifier: id,
         content: {
           title: content.title,
           body: content.body,
-          data: content.data as unknown as Record<string, unknown>,
+          data: data as unknown as Record<string, unknown>,
           // iOS plays this file (or nothing); Android uses the channel's sound.
           sound: content.sound ? CHIME_SOUND_FILE : false,
           ...(content.vibrate ? { vibrate: VIBRATION_PATTERN } : {}),
         },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAtMs, channelId: content.channelId },
       });
-      ledger.set(id, { fireAtMs, hash: hashReminderContent(content) });
     },
 
     async cancel(id) {
       await Notifications.cancelScheduledNotificationAsync(id);
-      ledger.delete(id);
     },
   };
 }

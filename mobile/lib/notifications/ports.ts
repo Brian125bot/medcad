@@ -12,14 +12,18 @@ export interface ScheduledReminder {
   id: string;
   /** Epoch ms the OS will fire at, or null when the trigger is not a date trigger. */
   fireAtMs: number | null;
-  /** `hashReminderContent` of the scheduled content, or null when it cannot be recomputed. */
+  /** `hashReminderContent` of the scheduled content (from schedule metadata), or null when absent. */
   contentHash: string | null;
+  /** Whether it was scheduled as an exact alarm; null when absent (no metadata). */
+  exact: boolean | null;
 }
 
 export interface ReminderScheduleRequest {
   id: string;
   fireAtMs: number;
   content: ReminderContent;
+  /** Exact-alarm access at schedule time (Android picks exact vs inexact then). */
+  exact: boolean;
 }
 
 export interface NotificationSchedulerPort {

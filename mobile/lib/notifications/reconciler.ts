@@ -130,6 +130,11 @@ export class ReminderEngine {
         return;
       }
 
+      // Android fixes exact vs inexact when an alarm is set, so each entry records
+      // the access it was set with; 'unknown' (no native module) counts as exact.
+      const exactStatus = await permissions.getExactAlarmStatus();
+      const exact = exactStatus !== 'denied';
+
       await scheduler.ensureChannels();
       const now = clock.now();
       const { startKey, endKey } = planningDateRange(now.todayKey);
@@ -148,6 +153,7 @@ export class ReminderEngine {
           id: notification.id,
           fireAtMs: clock.toEpochMs(notification.fireAt.dateKey, notification.fireAt.minuteOfDay),
           content,
+          exact,
           hash: hashReminderContent(content),
         });
       }
@@ -156,16 +162,17 @@ export class ReminderEngine {
       for (const entry of await scheduler.listScheduled()) {
         if (!entry.id.startsWith(DOSE_NAMESPACE)) continue;
         const want = desired.get(entry.id);
-        if (want && want.fireAtMs === entry.fireAtMs && want.hash === entry.contentHash) unchanged.add(entry.id);
+        if (want && want.fireAtMs === entry.fireAtMs && want.hash === entry.contentHash && want.exact === entry.exact) {
+          unchanged.add(entry.id);
+        }
         else await scheduler.cancel(entry.id);
       }
       for (const { hash: _hash, ...request } of desired.values()) {
         if (!unchanged.has(request.id)) await scheduler.schedule(request);
       }
 
-      const exact = await permissions.getExactAlarmStatus();
       this.setStatus({
-        state: exact === 'denied' ? 'exact-alarm-denied' : 'ok',
+        state: exactStatus === 'denied' ? 'exact-alarm-denied' : 'ok',
         lastReconciledAt: clock.nowIso(),
         scheduledCount: desired.size,
         truncated: plan.truncated,
