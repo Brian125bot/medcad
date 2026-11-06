@@ -36,6 +36,8 @@ export interface NotificationSchedulerPort {
   listScheduled(): Promise<ScheduledReminder[]>;
   schedule(request: ReminderScheduleRequest): Promise<void>;
   cancel(id: string): Promise<void>;
+  /** Removes a presented notification from the tray (COR-77). */
+  dismiss(id: string): Promise<void>;
   /** Sets the home-screen badge to pending doses for today; no-op where unsupported. */
   setBadgeCount(count: number): Promise<void>;
 }

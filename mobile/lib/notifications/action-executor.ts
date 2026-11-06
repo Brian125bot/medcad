@@ -1,19 +1,24 @@
 /**
  * COR-77: runs repository / scheduler work for a lock-screen action (no Expo).
  */
-import { DEFAULT_MEDICATION_ALERT, type Medication } from '../domain/medication-data';
-import { mergeProfiles } from './planner';
 import { buildDoseKey } from '../schedule/doses';
+import { plannedDosesFromPayload } from './action-planned-doses';
 import { errorClassName, planNotificationAction } from './actions';
 import { computeTodayPendingBadgeCount } from './badge-count';
 import { buildReminderContent } from './content';
-import { parseSlotTime } from './fire-time';
+import {
+  dateKeyRange,
+  filterActionableDoseRefs,
+  filterSnoozeCandidates,
+} from './pending-doses';
 import { MalformedNotificationPayloadError } from './payload';
 import type { ClockPort, NotificationSchedulerPort, ReminderRepositoryPort } from './ports';
 import { readReminderSettings } from './settings';
 import { buildSnoozeNotificationId, snoozeFireInstant } from './snooze';
-import type { CivilInstant, PlannedDose } from './types';
+import type { CivilInstant } from './types';
 import { DOSE_NAMESPACE, DOSE_REMINDER_CATEGORY } from './types';
+
+export type ActionExecutionOutcome = 'malformed' | 'failed' | 'completed';
 
 export interface ActionLogRepositoryPort extends ReminderRepositoryPort {
   logDose(
@@ -22,6 +27,7 @@ export interface ActionLogRepositoryPort extends ReminderRepositoryPort {
     slotId: string,
     status: 'taken' | 'skipped',
   ): Promise<unknown>;
+  setPreference<T>(prefKey: string, value: T): Promise<void>;
 }
 
 export interface ActionExecutorDeps {
@@ -36,38 +42,32 @@ function nowInstant(clock: ClockPort): CivilInstant {
   return { dateKey: now.todayKey, minuteOfDay: now.minuteOfDay };
 }
 
-async function refreshBadge(deps: ActionExecutorDeps): Promise<void> {
-  const todayKey = deps.clock.now().todayKey;
-  const [medications, entries] = await Promise.all([
-    deps.repository.getAllMedications(),
-    deps.repository.getDoseLogsInRange(todayKey, todayKey),
-  ]);
-  const logs = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
-  const count = computeTodayPendingBadgeCount(medications, logs, todayKey);
-  await deps.scheduler.setBadgeCount(count);
+async function refreshBadgeSafe(deps: ActionExecutorDeps): Promise<void> {
+  try {
+    const todayKey = deps.clock.now().todayKey;
+    const [medications, entries] = await Promise.all([
+      deps.repository.getAllMedications(),
+      deps.repository.getDoseLogsInRange(todayKey, todayKey),
+    ]);
+    const logs = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
+    const count = computeTodayPendingBadgeCount(medications, logs, todayKey);
+    await deps.scheduler.setBadgeCount(count);
+  } catch (error) {
+    deps.log?.('[reminders] badge refresh failed', errorClassName(error));
+  }
 }
 
-function plannedDosesFromPayload(
-  medications: Medication[],
-  doses: { dateKey: string; medicationId: string; slotId: string }[],
-): { planned: PlannedDose[]; profile: { sound: boolean; vibrate: boolean } } {
-  const medById = new Map(medications.map((m) => [m.id, m]));
-  const planned: PlannedDose[] = [];
-  let profile = { ...DEFAULT_MEDICATION_ALERT };
-  for (const dose of doses) {
-    const medication = medById.get(dose.medicationId);
-    const slot = medication?.timeSlots.find((s) => s.id === dose.slotId);
-    const doseMinuteOfDay = slot ? parseSlotTime(slot.time) : 0;
-    planned.push({
-      dateKey: dose.dateKey,
-      medicationId: dose.medicationId,
-      slotId: dose.slotId,
-      medicationName: medication?.name ?? '',
-      doseMinuteOfDay,
-    });
-    if (medication?.alert) profile = mergeProfiles(profile, medication.alert);
+async function clearRespondedNotification(deps: ActionExecutorDeps, notificationId: string): Promise<void> {
+  try {
+    await deps.scheduler.cancel(notificationId);
+  } catch (error) {
+    deps.log?.('[reminders] cancel after action failed', errorClassName(error));
   }
-  return { planned, profile };
+  try {
+    await deps.scheduler.dismiss(notificationId);
+  } catch (error) {
+    deps.log?.('[reminders] dismiss after action failed', errorClassName(error));
+  }
 }
 
 export async function executeNotificationAction(
@@ -76,43 +76,64 @@ export async function executeNotificationAction(
   data: unknown,
   notificationId: string,
   options: { exact: boolean },
-): Promise<void> {
+): Promise<ActionExecutionOutcome> {
   let plan;
   try {
     plan = planNotificationAction(actionIdentifier, data);
   } catch (error) {
-    deps.log?.('[reminders] action payload rejected', errorClassName(error));
-    return;
+    if (error instanceof MalformedNotificationPayloadError) {
+      deps.log?.('[reminders] action payload rejected', errorClassName(error));
+    } else {
+      deps.log?.('[reminders] action payload rejected', errorClassName(error));
+    }
+    return 'malformed';
   }
-  if (!plan) return;
+  if (!plan) return 'completed';
+
+  const range = dateKeyRange(plan.doses);
+  if (!range) return 'completed';
+
+  const [medications, entries, scheduled] = await Promise.all([
+    deps.repository.getAllMedications(),
+    deps.repository.getDoseLogsInRange(range.min, range.max),
+    deps.scheduler.listScheduled(),
+  ]);
+  const logs = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
+  const nowMs = deps.clock.toEpochMs(deps.clock.now().todayKey, deps.clock.now().minuteOfDay);
 
   if (plan.type === 'log') {
-    for (const dose of plan.doses) {
+    const targets = filterActionableDoseRefs(plan.doses, logs, medications);
+    if (targets.length === 0) {
+      await clearRespondedNotification(deps, notificationId);
+      await refreshBadgeSafe(deps);
+      return 'completed';
+    }
+    for (const dose of targets) {
       try {
         await deps.repository.logDose(dose.dateKey, dose.medicationId, dose.slotId, plan.status);
       } catch (error) {
         deps.log?.('[reminders] action log failed', errorClassName(error));
+        return 'failed';
       }
     }
-    try {
-      await deps.scheduler.cancel(notificationId);
-    } catch (error) {
-      deps.log?.('[reminders] cancel after action failed', errorClassName(error));
-    }
-    await refreshBadge(deps);
-    return;
+    await clearRespondedNotification(deps, notificationId);
+    await refreshBadgeSafe(deps);
+    return 'completed';
+  }
+
+  const snoozeTargets = filterSnoozeCandidates(plan.doses, scheduled, nowMs, logs, medications);
+  if (snoozeTargets.length === 0) {
+    await clearRespondedNotification(deps, notificationId);
+    await refreshBadgeSafe(deps);
+    return 'completed';
   }
 
   const fireAt = snoozeFireInstant(nowInstant(deps.clock), plan.delayMinutes);
   const fireAtMs = deps.clock.toEpochMs(fireAt.dateKey, fireAt.minuteOfDay);
-  const scheduled = await deps.scheduler.listScheduled();
   const reserved = new Set(scheduled.map((entry) => entry.id));
   const snoozeId = buildSnoozeNotificationId(fireAt, reserved);
-  const [medications, settings] = await Promise.all([
-    deps.repository.getAllMedications(),
-    readReminderSettings(deps.repository),
-  ]);
-  const { planned, profile } = plannedDosesFromPayload(medications, plan.doses);
+  const settings = await readReminderSettings(deps.repository);
+  const { planned, profile } = plannedDosesFromPayload(medications, snoozeTargets);
   const content = buildReminderContent(
     { id: snoozeId, kind: 'dose-group', fireAt, doses: planned, profile },
     settings,
@@ -124,17 +145,14 @@ export async function executeNotificationAction(
     content: { ...content, categoryIdentifier: DOSE_REMINDER_CATEGORY },
     exact: options.exact,
   });
-  try {
-    await deps.scheduler.cancel(notificationId);
-  } catch (error) {
-    deps.log?.('[reminders] cancel before snooze failed', errorClassName(error));
-  }
-  for (const dose of plan.doses) {
+  await clearRespondedNotification(deps, notificationId);
+  for (const dose of snoozeTargets) {
     const doseKey = buildDoseKey(dose.dateKey, dose.medicationId, dose.slotId);
     for (const entry of scheduled) {
       if (!entry.doseKeys?.includes(doseKey)) continue;
       if (entry.id.startsWith(DOSE_NAMESPACE)) await deps.scheduler.cancel(entry.id);
     }
   }
-  await refreshBadge(deps);
+  await refreshBadgeSafe(deps);
+  return 'completed';
 }
