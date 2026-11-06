@@ -14,6 +14,8 @@ import type {
   NotificationSchedulerPort,
   ScheduledReminder,
 } from './ports';
+import { toExactAlarmStatus } from './exact-alarm';
+import { canScheduleExactAlarms } from './expo-exact-alarm';
 import { readScheduleMeta, withScheduleMeta } from './schedule-meta';
 import { DOSE_NAMESPACE } from './types';
 
@@ -97,9 +99,9 @@ export function createExpoPermissions(): NotificationPermissionPort {
       return toPermission(result.status);
     },
     async getExactAlarmStatus(): Promise<ExactAlarmPermission> {
-      // expo-notifications 57 exposes no canScheduleExactAlarms(); the library
-      // silently falls back to inexact alarms when access is off (see docs/notifications.md).
-      return Platform.OS === 'android' ? 'unknown' : 'granted';
+      // expo-notifications 57 exposes no canScheduleExactAlarms(); the local
+      // ExactAlarm module does (absent module => 'unknown').
+      return toExactAlarmStatus(Platform.OS, Platform.OS === 'android' ? canScheduleExactAlarms() : null);
     },
   };
 }

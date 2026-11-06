@@ -50,4 +50,21 @@ describe('notification boundary', () => {
       .sort();
     expect(callers).toEqual(['lib/notifications/expo-clock.ts', 'lib/notifications/fire-time.ts']);
   });
+
+  it('only lib/notifications may import the exact-alarm native module', () => {
+    const offenders = sourceFiles(ROOT)
+      .filter((file) => !file.includes('/lib/notifications/') && !file.includes('/modules/exact-alarm/'))
+      .filter((file) => imports(file).some((spec) => /(^|\/)modules\/exact-alarm(\/|$)/.test(spec)));
+    expect(offenders).toEqual([]);
+  });
+
+  it('the JS wrapper, Kotlin module and autolinking config agree on names', () => {
+    const wrapper = readFileSync(join(ROOT, 'lib', 'notifications', 'expo-exact-alarm.ts'), 'utf8');
+    const kotlin = readFileSync(join(ROOT, 'modules', 'exact-alarm', 'android', 'src', 'main', 'java', 'expo', 'modules', 'exactalarm', 'ExactAlarmModule.kt'), 'utf8');
+    const config = JSON.parse(readFileSync(join(ROOT, 'modules', 'exact-alarm', 'expo-module.config.json'), 'utf8')) as { platforms: string[]; android: { modules: string[] } };
+    expect(wrapper).toContain("requireOptionalNativeModule<ExactAlarmNativeModule>('ExactAlarm')");
+    expect(kotlin).toContain('Name("ExactAlarm")');
+    for (const fn of ['canScheduleExactAlarms', 'openExactAlarmSettings']) expect(kotlin).toContain(`Function("${fn}")`);
+    expect(config).toEqual({ platforms: ['android'], android: { modules: ['expo.modules.exactalarm.ExactAlarmModule'] } });
+  });
 });

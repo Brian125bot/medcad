@@ -26,6 +26,10 @@ module.exports = defineConfig([
               group: ['**/lib/notifications/expo-*', '@/lib/notifications/expo-*'],
               message: 'Notification adapters are internal to lib/notifications.',
             },
+            {
+              group: ['@/modules/exact-alarm', '@/modules/exact-alarm/*', '**/modules/exact-alarm', '**/modules/exact-alarm/*'],
+              message: 'The exact-alarm native module is internal to lib/notifications.',
+            },
           ],
         },
       ],

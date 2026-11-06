@@ -14,7 +14,7 @@ import {
 
 import { cadenceTokens } from "@/constants/theme";
 import type { Medication, ScheduleFrequency } from "@/lib/domain/medication-data";
-import { ensureReminderPermission } from "@/lib/notifications";
+import { ensureReminderPermission, maybePromptForExactAlarm } from "@/lib/notifications";
 import {
   firstInvalidStep,
   formToMedication,
@@ -99,7 +99,7 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
       const med = formToMedication(state, { newId: randomUUID, existing });
       await onSave(med);
       // COR-76: reminders default on, so the first save is when we ask for notification permission.
-      if (med.active && med.timeSlots.some((slot) => slot.reminderEnabled !== false)) void ensureReminderPermission();
+      if (med.active && med.timeSlots.some((slot) => slot.reminderEnabled !== false)) void ensureReminderPermission().then(() => maybePromptForExactAlarm());
     } catch {
       // Intentionally no details: the error may embed PHI.
       setSaveError("Could not save. Please try again.");
@@ -219,7 +219,7 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
                     <View className="flex-row items-center">
                       <Switch value={slot.reminderEnabled} onValueChange={(reminderEnabled) => {
                         updateSlot(i, { reminderEnabled });
-                        if (reminderEnabled) void ensureReminderPermission();
+                        if (reminderEnabled) void ensureReminderPermission().then(() => maybePromptForExactAlarm());
                       }} trackColor={{ true: cadenceTokens.accent }} />
                       <Text className="ml-2 text-sm text-slate-700">Reminder</Text>
                     </View>
