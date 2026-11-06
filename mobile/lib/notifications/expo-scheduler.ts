@@ -7,7 +7,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { buildDoseKey } from '../schedule/doses';
-import { DOSE_REMINDER_ACTIONS, DOSE_REMINDER_CATEGORY } from './categories';
+import { DOSE_REMINDER_ACTIONS, DOSE_REMINDER_CATEGORY, toExpoCategoryActions } from './categories';
 import { CHIME_SOUND_FILE, hashReminderContent, REMINDER_CHANNELS } from './content';
 import type {
   ExactAlarmPermission,
@@ -65,11 +65,7 @@ export function createExpoScheduler(): NotificationSchedulerPort {
           ? [
               Notifications.setNotificationCategoryAsync(
                 DOSE_REMINDER_CATEGORY,
-                DOSE_REMINDER_ACTIONS.map((action) => ({
-                  identifier: action.identifier,
-                  buttonTitle: action.buttonTitle,
-                  options: { opensAppToForeground: action.opensAppToForeground },
-                })),
+                toExpoCategoryActions(DOSE_REMINDER_ACTIONS),
               ),
             ]
           : [],
@@ -115,6 +111,14 @@ export function createExpoScheduler(): NotificationSchedulerPort {
 
     async cancel(id) {
       await Notifications.cancelScheduledNotificationAsync(id);
+    },
+
+    async dismiss(id) {
+      try {
+        await Notifications.dismissNotificationAsync(id);
+      } catch {
+        // Already dismissed or never presented.
+      }
     },
 
     async setBadgeCount(count: number) {

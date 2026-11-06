@@ -1,6 +1,6 @@
 {
   "name": "medcad-mobile",
-  "main": "expo-router/entry",
+  "main": "./index.ts",
   "version": "1.0.0-alpha.1",
   "dependencies": {
     "@react-native-community/datetimepicker": "9.1.0",

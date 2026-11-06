@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { errorClassName, planNotificationAction } from '../lib/notifications/actions';
 import { MalformedNotificationPayloadError } from '../lib/notifications/payload';
-import { DOSE_REMINDER_ACTIONS } from '../lib/notifications/categories';
+import { DOSE_REMINDER_ACTIONS, toExpoCategoryActions } from '../lib/notifications/categories';
 import { isActionableNotificationData } from '../lib/notifications/payload';
 import { ACTION_SKIP_DOSE, ACTION_SNOOZE_15M, ACTION_TAKE_DOSE } from '../lib/notifications/types';
 
@@ -61,6 +61,13 @@ describe('planNotificationAction', () => {
 
   it('registers three category actions', () => {
     expect(DOSE_REMINDER_ACTIONS.map((a) => a.identifier)).toEqual([ACTION_TAKE_DOSE, ACTION_SNOOZE_15M, ACTION_SKIP_DOSE]);
+    for (const action of DOSE_REMINDER_ACTIONS) {
+      expect(action).toMatchObject({ opensAppToForeground: false, authenticationRequired: true });
+    }
+    expect(toExpoCategoryActions(DOSE_REMINDER_ACTIONS)[0].options).toEqual({
+      opensAppToForeground: false,
+      isAuthenticationRequired: true,
+    });
   });
 
   it('detects actionable payloads', () => {
