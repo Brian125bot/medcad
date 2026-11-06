@@ -95,7 +95,8 @@ export class ReminderEngine {
       if (
         change.prefKey === PREF_HANDLED_ACTION_RESPONSES ||
         change.prefKey === PREF_EXACT_ALARM_PROMPTED ||
-        change.prefKey === PREF_REFILL_ALERT_STATE
+        change.prefKey === PREF_REFILL_ALERT_STATE ||
+        change.prefKey.startsWith('calendar.')
       ) {
         return Promise.resolve();
       }

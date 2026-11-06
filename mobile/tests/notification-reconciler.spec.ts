@@ -260,6 +260,16 @@ describe('ReminderEngine.reconcile', () => {
     expect(scheduler.calls).toEqual([]);
   });
 
+  it('ignores every calendar.* preference change (calendar sync settings and its own writes)', async () => {
+    const { engine, scheduler } = setup();
+    await engine.reconcile();
+    scheduler.calls.length = 0;
+    for (const prefKey of ['calendar.sync.enabled', 'calendar.sync.showMedicationNames', 'calendar.sync.tombstones', 'calendar.sync.fingerprint']) {
+      await engine.handleChange({ type: 'preference-changed', prefKey });
+    }
+    expect(scheduler.calls).toEqual([]);
+  });
+
   it('widens log reads when a scheduled snooze references an earlier dose date', async () => {
     const { engine, repository, scheduler } = setup();
     scheduler.scheduled.set(`${SNOOZE_NAMESPACE}2026-10-16.0815`, {
