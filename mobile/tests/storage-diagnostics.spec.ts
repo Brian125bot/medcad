@@ -56,6 +56,23 @@ describe('collectStorageDiagnostics', () => {
     expect(text).toContain('Schema version (schema_versions / code): 1 / 1');
     expect(text).toContain('Rows: 10 medications, 20 time slots, 500 dose logs, 0 preferences');
     expect(text).toContain('not SQLCipher');
+    expect(text).not.toContain('Device:');
+    expect(text).toContain(`getStorageEngineInfo(): ${JSON.stringify(full.engineInfo)}`);
+    expect(full.engineInfo).toMatchObject({ engine: 'SQLite (Encrypted)', cipher: 'AES-256-GCM', medicationCount: 10, doseLogCount: 500 });
+    const withDevice = diagnosticsToText(full, 'test vault', {
+      platform: 'android',
+      deviceModel: 'Pixel 8',
+      manufacturer: 'Google',
+      osName: 'Android',
+      osVersion: '16',
+      architecture: 'arm64-v8a',
+      isPhysicalDevice: false,
+      buildMode: 'debug',
+    });
+    expect(withDevice).toContain('Device: Google Pixel 8 (simulator/emulator — not valid COR-88 evidence); Android 16 (android)');
+    expect(withDevice).toContain('Build: debug');
+    const unknownOs = diagnosticsToText(full, 'x', { platform: 'ios', deviceModel: null, osName: null, osVersion: null, architecture: null, isPhysicalDevice: true });
+    expect(unknownOs).toContain('Device: unknown; unknown unknown (ios)');
     const envelope = JSON.parse((await e.keystore.getItem(VAULT_KEY_ID))!) as { k: string };
     const serialized = JSON.stringify(full) + text;
     expect(serialized).not.toContain(envelope.k);

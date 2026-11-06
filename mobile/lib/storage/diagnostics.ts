@@ -10,7 +10,7 @@
  * has no way to reach the app's real vault.
  */
 import { createStorageContext, VAULT_CANARY_ROW_ID, VAULT_CANARY_TABLE, VAULT_KEY_ID, type StorageContext, type StorageEngineInfo, type StoragePlatform } from './context';
-import { buildSyntheticDataset, type BenchmarkEnvironment } from './device-benchmark';
+import { buildSyntheticDataset, describeBuild, describeDevice, type BenchmarkEnvironment, type DeviceTelemetry } from './device-benchmark';
 import { VaultKeyMissingError } from './ports';
 
 export interface StorageDiagnostics {
@@ -60,9 +60,16 @@ function yesNo(value: boolean): string {
   return value ? 'yes' : 'no';
 }
 
-export function diagnosticsToText(d: StorageDiagnostics, label: string): string {
+export function diagnosticsToText(d: StorageDiagnostics, label: string, telemetry?: DeviceTelemetry): string {
+  const device = telemetry
+    ? [
+        `Device: ${describeDevice(telemetry)}; ${telemetry.osName ?? 'unknown'} ${telemetry.osVersion ?? 'unknown'} (${telemetry.platform})`,
+        `Build: ${describeBuild(telemetry.buildMode)}`,
+      ]
+    : [];
   return [
     `CadenceRx storage diagnostics — ${label}`,
+    ...device,
     `Engine: ${d.engineInfo.engine} (${d.engineInfo.cipher} field-level encryption; DB file itself not encrypted, not SQLCipher)`,
     `Engine status: ${d.engineInfo.status}; last write ${d.engineInfo.lastWriteLatencyMs} ms`,
     `Vault key present in SecureStore: ${yesNo(d.vault.keyPresent)}`,
@@ -71,6 +78,8 @@ export function diagnosticsToText(d: StorageDiagnostics, label: string): string 
     `Schema version (schema_versions / code): ${d.vault.schemaVersion ?? 'none'} / ${d.engineInfo.schemaVersion}`,
     `PRAGMA user_version: ${d.vault.userVersion}`,
     `Rows: ${d.counts.medications} medications, ${d.counts.timeSlots} time slots, ${d.counts.doseLogs} dose logs, ${d.counts.preferences} preferences`,
+    // Counts, versions and status only: safe to paste.
+    `getStorageEngineInfo(): ${JSON.stringify(d.engineInfo)}`,
   ].join('\n');
 }
 

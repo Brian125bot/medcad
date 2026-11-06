@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   average,
   BENCHMARK_GATES,
+  describeBuild,
+  MICRO_SAMPLES_PER_RUN,
+  microStats,
   buildReport,
   buildSyntheticDataset,
   DATASET_DOSE_LOGS,
@@ -36,6 +39,7 @@ const telemetry: DeviceTelemetry = {
   architecture: 'arm64',
   isPhysicalDevice: true,
   appVersion: '1.0.0',
+  buildMode: 'release',
 };
 
 const dirs: string[] = [];
@@ -170,6 +174,13 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(report.integrity.atomicRollback.rowsAfter).toBe(report.integrity.atomicRollback.rowsBefore);
     expect(report.integrity.dataVerified).toEqual({ passed: true, medications: 10, doseLogs: 500, rangeRows: 500, doseTaken: true });
     expect(report.legacy.runs).toBe(4);
+    expect(report.legacy.samples).toBe(4 * MICRO_SAMPLES_PER_RUN);
+    for (const op of ['write', 'read', 'batch'] as const) {
+      const stats = report.legacy[op];
+      expect(stats.p50Ms).toBeLessThanOrEqual(stats.p95Ms);
+      expect(stats.p95Ms).toBeLessThanOrEqual(stats.maxMs);
+    }
+    expect(report.legacy.writeTargetMet).toBe(report.legacy.write.p95Ms < 15);
     expect(report.overall).toBe('PASS');
     expect(report.generatedAt).toBe('2026-10-16T16:00:00.000Z');
     expect(report.encryption.cipher).toBe('AES-256-GCM');
@@ -181,7 +192,7 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(existsSync(env.file)).toBe(false);
     const json = reportToJson(report);
     expect(json).not.toMatch(/BENCH(NAME|NOTE|STRENGTH|RX|PHARM)/);
-    expect(JSON.parse(json).schema).toBe('cadencerx.cor88.device-benchmark/v1');
+    expect(JSON.parse(json).schema).toBe('cadencerx.cor88.device-benchmark/v2');
   }, 60_000);
 
   it('uses the real clock by default and honours warmRuns', async () => {
@@ -189,6 +200,8 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(report.warmRuns).toBe(0);
     expect(report.scenarios[0].coldMs).toBeGreaterThan(0);
     expect(report.scenarios[1].avgWarmMs).toBe(0);
+    expect(report.legacy.samples).toBe(MICRO_SAMPLES_PER_RUN);
+    expect(report.legacy.write.avgWarmMs).toBe(0);
     expect(Number.isNaN(Date.parse(report.generatedAt))).toBe(false);
   }, 30_000);
 
@@ -237,16 +250,16 @@ describe('buildReport and Markdown', () => {
     atomicRollback: { passed: true, rowsBefore: 510, rowsAfter: 510 },
     dataVerified: { passed: true, medications: 10, doseLogs: 500, rangeRows: 500, doseTaken: true },
   };
-  const run = (kind: 'cold' | 'warm', ms: [number, number, number, number], write = 2): RunResult => ({
+  const run = (kind: 'cold' | 'warm', ms: [number, number, number, number], writes: number[] = [2]): RunResult => ({
     kind,
     scenarioMs: { A: ms[0], B: ms[1], C: ms[2], D: ms[3] },
-    legacy: { writeLatencyMs: write, readLatencyMs: 0.5, batchWriteLatencyMs: 4 },
+    legacy: writes.map((write) => ({ writeLatencyMs: write, readLatencyMs: 0.5, batchWriteLatencyMs: 4 })),
   });
 
   it('judges A on cold and B–D on the warm average', () => {
     const report = buildReport(
       telemetry,
-      [run('cold', [150, 400, 100, 60], 20), run('warm', [10, 100, 20, 10]), run('warm', [10, 140, 40, 30]), run('warm', [10, 120, 30, 20])],
+      [run('cold', [150, 400, 100, 60], [20, 3]), run('warm', [10, 100, 20, 10]), run('warm', [10, 140, 40, 30]), run('warm', [10, 120, 30, 20])],
       okIntegrity,
       new Date('2026-10-16T16:00:00Z'),
     );
@@ -257,7 +270,10 @@ describe('buildReport and Markdown', () => {
     expect(byId.C.status).toBe('WARN'); // 30
     expect(byId.D.status).toBe('WARN'); // 20
     expect(report.overall).toBe('WARN');
-    expect(report.legacy.writeP95Ms).toBe(20);
+    expect(report.legacy.samples).toBe(5);
+    expect(report.legacy.write).toEqual({ coldMs: 20, avgWarmMs: 2, p50Ms: 2, p95Ms: 20, maxMs: 20 });
+    expect(report.legacy.read).toEqual({ coldMs: 0.5, avgWarmMs: 0.5, p50Ms: 0.5, p95Ms: 0.5, maxMs: 0.5 });
+    expect(report.legacy.batch.p95Ms).toBe(4);
     expect(report.legacy.writeTargetMet).toBe(false);
 
     const md = reportToMarkdown(report);
@@ -278,7 +294,14 @@ describe('buildReport and Markdown', () => {
     expect(md).toContain('| Batch Insert (500 Dose Logs) | 400.00 ms | 120.00 ms | <120 ms | WARN |');
     expect(md).toContain('| 365-Day Query & Hydration |');
     expect(md).toContain('| Single Dose Update + Streak Calc |');
-    expect(md).toContain('target not met');
+    expect(md).toContain('- **Build:** release (quotable)');
+    expect(md).toContain('- **Battery / Power Mode:** _fill in');
+    expect(md).toContain('COR-71 `repository.runBenchmark()`, 5 samples over 4 runs');
+    expect(md).toContain('| Operation | Cold (1st sample) | Avg Warm | p50 | p95 | Max | Target |');
+    expect(md).toContain('| Single encrypted write | 20.00 ms | 2.00 ms | 2.00 ms | 20.00 ms | 20.00 ms | <15 ms (p95): FAIL |');
+    expect(md).toContain('| Indexed single-row read | 0.50 ms | 0.50 ms | 0.50 ms | 0.50 ms | 0.50 ms | — |');
+    expect(md).toContain('| 5-row encrypted batch (one transaction) | 4.00 ms |');
+    expect(md).toContain('write target on this run: **not met** (single-write p95 20.00 ms)');
     expect(md).toContain('- [x] Zero plaintext exposure verified in local application sandbox files');
     expect(md).toContain('- [x] Sensitive fields in the SQLite database unreadable without the SecureStore encryption key');
     expect(md).toContain('COR-71 encrypts the sensitive fields, not the whole file');
@@ -303,7 +326,9 @@ describe('buildReport and Markdown', () => {
     expect(md).toContain('- **OS Version:** unknown unknown (android)');
     expect(md).toContain('- **Chipset / Arch:** unknown');
     expect(md).toContain('app unknown');
-    expect(md).toContain('target met');
+    expect(md).toContain('- **Build:** unknown');
+    expect(md).toContain('<15 ms (p95): PASS');
+    expect(md).toContain('write target on this run: **met**');
     expect(md).toContain('- [ ] Zero plaintext exposure');
     expect(md).toContain('- [x] Sensitive fields');
     expect(md).toContain('**FAIL**.');
@@ -328,6 +353,18 @@ describe('buildReport and Markdown', () => {
     expect(broken).toContain('- [ ] Sensitive fields');
     expect(broken).toContain('- [ ] Atomic transactions');
     expect(broken).toContain('(seeded-data verification failed)');
+  });
+
+  it('labels debug builds as not quotable', () => {
+    expect(describeBuild('debug')).toMatch(/^debug — .*not the quotable figure/);
+    expect(describeBuild(null)).toBe('unknown');
+    const md = reportToMarkdown(buildReport({ ...telemetry, buildMode: 'debug' }, [run('cold', [1, 1, 1, 1])], okIntegrity, new Date()));
+    expect(md).toContain('- **Build:** debug — development build');
+  });
+
+  it('reports zero micro stats for a run without samples', () => {
+    const empty = run('cold', [1, 1, 1, 1], []);
+    expect(microStats(empty, [], [empty], 'write')).toEqual({ coldMs: 0, avgWarmMs: 0, p50Ms: 0, p95Ms: 0, maxMs: 0 });
   });
 
   it('judges B–D on cold when there are no warm runs', () => {

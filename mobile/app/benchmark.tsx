@@ -36,6 +36,7 @@ function readTelemetry(): DeviceTelemetry {
     architecture: Device.supportedCpuArchitectures?.join(", ") ?? null,
     isPhysicalDevice: Device.isDevice,
     appVersion: Constants.expoConfig?.version ?? null,
+    buildMode: __DEV__ ? "debug" : "release",
   };
 }
 
@@ -84,7 +85,7 @@ export default function BenchmarkScreen() {
     setDiagCopied(false);
     try {
       // Real vault: read-only. Recovery check: isolated benchmark vault only.
-      const app = diagnosticsToText(await getAppStorageDiagnostics(), "app vault (read-only)");
+      const app = diagnosticsToText(await getAppStorageDiagnostics(), "app vault (read-only)", telemetry);
       const recovery = recoveryToText(await runBenchmarkVaultRecoveryCheck(toDateKey(new Date())));
       setDiagText(`${app}\n\n${recovery}`);
     } catch (cause) {
@@ -115,6 +116,7 @@ export default function BenchmarkScreen() {
           <Row label="Physical device" value={telemetry.isPhysicalDevice ? "yes" : "no — simulator results are not COR-88 evidence"} />
           <Row label="OS" value={`${telemetry.osName ?? "?"} ${telemetry.osVersion ?? ""}`} />
           <Row label="Arch" value={telemetry.architecture ?? "unknown"} />
+          <Row label="Build" value={telemetry.buildMode === "release" ? "release" : "debug — re-run in release for quotable numbers"} />
           <Row label="Encryption" value={`${ENCRYPTION_BACKEND.cipher} field-level, key in SecureStore (not SQLCipher)`} />
         </View>
 
@@ -157,7 +159,9 @@ export default function BenchmarkScreen() {
               </View>
             ))}
             <Text className="mt-3 text-xs text-slate-600">
-              COR-71 single write p50/p95: {report.legacy.writeP50Ms.toFixed(2)} / {report.legacy.writeP95Ms.toFixed(2)} ms (target {"<"} 15)
+              COR-71 p50/p95 ms ({report.legacy.samples} samples): write {report.legacy.write.p50Ms.toFixed(2)} / {report.legacy.write.p95Ms.toFixed(2)} (target{" "}
+              {"<"} {report.legacy.writeTargetMs}: {report.legacy.writeTargetMet ? "met" : "not met"}) · read {report.legacy.read.p50Ms.toFixed(2)} /{" "}
+              {report.legacy.read.p95Ms.toFixed(2)} · batch {report.legacy.batch.p50Ms.toFixed(2)} / {report.legacy.batch.p95Ms.toFixed(2)}
             </Text>
             <Text className="mt-1 text-xs text-slate-600">
               Integrity: plaintext {report.integrity.plaintextScan.passed ? "PASS" : "FAIL"} · wrong key{" "}
