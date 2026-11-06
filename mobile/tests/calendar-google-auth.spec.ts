@@ -60,6 +60,12 @@ describe('mapAuthSessionResult', () => {
       errorCode: 'ERR_REQUEST_FAILED',
     });
     expect(mapAuthSessionResult({ type: 'error' })).toEqual({ kind: 'failed', errorCode: null });
+    expect(mapAuthSessionResult({ type: 'error', error: { code: 7 } })).toEqual({ kind: 'failed', errorCode: null });
+    expect(mapAuthSessionResult({ type: 'error', error: {} })).toEqual({ kind: 'failed', errorCode: null });
+    expect(mapAuthSessionResult({ type: 'error', params: { error: 'server_error' }, error: { code: 'IGNORED' } })).toEqual({
+      kind: 'failed',
+      errorCode: 'server_error',
+    });
   });
 });
 
