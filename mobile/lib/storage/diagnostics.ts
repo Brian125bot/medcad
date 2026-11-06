@@ -64,7 +64,7 @@ export function diagnosticsToText(d: StorageDiagnostics, label: string, telemetr
   const device = telemetry
     ? [
         `Device: ${describeDevice(telemetry)}; ${telemetry.osName ?? 'unknown'} ${telemetry.osVersion ?? 'unknown'} (${telemetry.platform})`,
-        `Build: ${describeBuild(telemetry.buildMode)}`,
+        `Build: ${describeBuild(telemetry.buildMode, telemetry.benchmarkFlag)}`,
       ]
     : [];
   return [

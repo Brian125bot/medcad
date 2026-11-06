@@ -9,6 +9,7 @@ import { cor88BenchmarkAccessEnabled } from "@/app/cor88-benchmark-access";
 import { cadenceTokens } from "@/constants/theme";
 import { toDateKey } from "@/lib/schedule/date-keys";
 import {
+  describeBuild,
   ENCRYPTION_BACKEND,
   reportToJson,
   reportToMarkdown,
@@ -118,16 +119,7 @@ export default function BenchmarkScreen() {
           <Row label="Physical device" value={telemetry.isPhysicalDevice ? "yes" : "no — simulator results are not COR-88 evidence"} />
           <Row label="OS" value={`${telemetry.osName ?? "?"} ${telemetry.osVersion ?? ""}`} />
           <Row label="Arch" value={telemetry.architecture ?? "unknown"} />
-          <Row
-            label="Build"
-            value={
-              telemetry.buildMode === "release"
-                ? telemetry.benchmarkFlag
-                  ? "release (quotable; enabled by EXPO_PUBLIC_COR88_BENCHMARK)"
-                  : "release"
-                : "debug — re-run in release for quotable numbers"
-            }
-          />
+          <Row label="Build" value={describeBuild(telemetry.buildMode, telemetry.benchmarkFlag)} />
           <Row label="Encryption" value={`${ENCRYPTION_BACKEND.cipher} field-level, key in SecureStore (not SQLCipher)`} />
         </View>
 
@@ -175,7 +167,7 @@ export default function BenchmarkScreen() {
               {report.legacy.read.p95Ms.toFixed(2)} · batch {report.legacy.batch.p50Ms.toFixed(2)} / {report.legacy.batch.p95Ms.toFixed(2)}
             </Text>
             <Text className="mt-1 text-xs text-slate-600">
-              Integrity: plaintext {report.integrity.plaintextScan.passed ? "PASS" : "FAIL"} · wrong key{" "}
+              Integrity: table scan {report.integrity.plaintextScan.passed ? "PASS" : "FAIL"} · file scan {report.integrity.fileScan.status} · wrong key{" "}
               {report.integrity.wrongKeyRejected.passed ? "PASS" : "FAIL"} · rollback {report.integrity.atomicRollback.passed ? "PASS" : "FAIL"} · data{" "}
               {report.integrity.dataVerified.passed ? "PASS" : "FAIL"}
             </Text>

@@ -20,6 +20,7 @@ import { computeAdherenceAnalytics } from '../schedule/analytics';
 import { addDaysToKey } from '../schedule/date-keys';
 import type { DoseLogEntry, DoseLogMap, DoseStatus, Medication } from '../domain/medication-data';
 import { buildDoseKey } from '../domain/medication-data';
+import { scanFileBytesForSentinels, type DatabaseFileBytes, type FileScanResult, formatDatabaseFileSizes } from './database-file-scan';
 import { createStorageContext, VAULT_KEY_ID, type StorageContext, type StoragePlatform } from './context';
 import type { SecureKeyStore } from './ports';
 
@@ -85,6 +86,8 @@ export interface DeviceTelemetry {
   appVersion?: string | null;
   /** `__DEV__` at run time. Debug builds run JS with dev checks; only release figures are quotable. */
   buildMode?: 'debug' | 'release' | null;
+  /** True when `EXPO_PUBLIC_COR88_BENCHMARK=1` was inlined at bundle time. */
+  benchmarkFlag?: boolean;
 }
 
 export interface BenchmarkEnvironment {
@@ -92,6 +95,8 @@ export interface BenchmarkEnvironment {
   createPlatform(): StoragePlatform;
   /** Delete the benchmark database file(s) and the benchmark keystore entry. Must be idempotent. */
   destroy(): Promise<void>;
+  /** Raw bytes of the benchmark DB file and `-wal` / `-shm` sidecars (basename only). */
+  readDatabaseFiles?(): Promise<DatabaseFileBytes[] | null>;
 }
 
 export interface BenchmarkProgress {
@@ -151,13 +156,14 @@ export interface ScenarioResult {
 
 export interface IntegrityResult {
   plaintextScan: { passed: boolean; tablesScanned: number; rowsScanned: number; leakCount: number };
+  fileScan: FileScanResult;
   wrongKeyRejected: { passed: boolean; canaryRejected: boolean; readsRefused: boolean };
   atomicRollback: { passed: boolean; rowsBefore: number; rowsAfter: number };
   dataVerified: { passed: boolean; medications: number; doseLogs: number; rangeRows: number; doseTaken: boolean };
 }
 
 export interface DeviceBenchmarkReport {
-  schema: 'cadencerx.cor88.device-benchmark/v2';
+  schema: 'cadencerx.cor88.device-benchmark/v3';
   generatedAt: string;
   telemetry: DeviceTelemetry;
   encryption: typeof ENCRYPTION_BACKEND;
@@ -452,8 +458,11 @@ async function runOnce(
       legacy.push({ writeLatencyMs, readLatencyMs, batchWriteLatencyMs });
     }
 
+    const sentinelUnion = [...dataset.sentinels, ...rollbackSet.sentinels];
+    const rawFiles = env.readDatabaseFiles ? await env.readDatabaseFiles() : null;
     const integrity: IntegrityResult = {
-      plaintextScan: await scanForPlaintext(platform, [...dataset.sentinels, ...rollbackSet.sentinels]),
+      plaintextScan: await scanForPlaintext(platform, sentinelUnion),
+      fileScan: scanFileBytesForSentinels(rawFiles, sentinelUnion),
       wrongKeyRejected: { passed: false, canaryRejected: false, readsRefused: false },
       atomicRollback: { passed: rowsAfter === medications + doseLogs, rowsBefore: medications + doseLogs, rowsAfter },
       dataVerified: {
@@ -485,11 +494,32 @@ async function runOnce(
   }
 }
 
+function mergeFileScan(all: IntegrityResult[]): FileScanResult {
+  if (all.some((row) => row.fileScan.status === 'failed')) {
+    const files = all.flatMap((row) => row.fileScan.files);
+    return {
+      status: 'failed',
+      files,
+      leakCount: all.reduce((total, row) => total + row.fileScan.leakCount, 0),
+    };
+  }
+  if (all.some((row) => row.fileScan.status === 'passed')) {
+    const passed = all.find((row) => row.fileScan.status === 'passed')!.fileScan;
+    return {
+      status: 'passed',
+      files: passed.files,
+      leakCount: all.reduce((total, row) => total + row.fileScan.leakCount, 0),
+    };
+  }
+  return { status: 'unavailable', files: [], leakCount: 0 };
+}
+
 function mergeIntegrity(all: IntegrityResult[]): IntegrityResult {
   const first = all[0];
   const every = (pick: (r: IntegrityResult) => boolean) => all.every(pick);
   return {
     plaintextScan: { ...first.plaintextScan, passed: every((r) => r.plaintextScan.passed), leakCount: all.reduce((n, r) => n + r.plaintextScan.leakCount, 0) },
+    fileScan: mergeFileScan(all),
     wrongKeyRejected: { ...first.wrongKeyRejected, passed: every((r) => r.wrongKeyRejected.passed) },
     atomicRollback: { ...first.atomicRollback, passed: every((r) => r.atomicRollback.passed) },
     dataVerified: { ...first.dataVerified, passed: every((r) => r.dataVerified.passed) },
@@ -581,12 +611,13 @@ export function buildReport(
   };
   const integrityOk =
     integrity.plaintextScan.passed &&
+    integrity.fileScan.status !== 'failed' &&
     integrity.wrongKeyRejected.passed &&
     integrity.atomicRollback.passed &&
     integrity.dataVerified.passed;
   const overall = integrityOk ? worstStatus(scenarios.map((scenario) => scenario.status)) : 'FAIL';
   return {
-    schema: 'cadencerx.cor88.device-benchmark/v2',
+    schema: 'cadencerx.cor88.device-benchmark/v3',
     generatedAt: generatedAt.toISOString(),
     telemetry,
     encryption: ENCRYPTION_BACKEND,
@@ -619,10 +650,22 @@ export function describeDevice(t: DeviceTelemetry): string {
   return `${device}${physical}`;
 }
 
-export function describeBuild(mode: DeviceTelemetry['buildMode']): string {
+export function describeBuild(mode: DeviceTelemetry['buildMode'], benchmarkFlag?: boolean): string {
+  if (mode === 'release' && benchmarkFlag) return 'release (quotable; enabled by EXPO_PUBLIC_COR88_BENCHMARK)';
   if (mode === 'release') return 'release (quotable)';
   if (mode === 'debug') return 'debug — development build with JS dev checks; not the quotable figure, re-run in release';
   return 'unknown';
+}
+
+function fileScanMarkdownLine(fileScan: FileScanResult): string {
+  if (fileScan.status === 'passed') {
+    const bytes = fileScan.files.reduce((total, file) => total + file.byteLength, 0);
+    return `- ${checkbox(true)} No plaintext PHI in the benchmark database file (main + WAL + SHM): 0 hits across ${bytes} bytes (${formatDatabaseFileSizes(fileScan.files)})`;
+  }
+  if (fileScan.status === 'failed') {
+    return `- ${checkbox(false)} No plaintext PHI in the benchmark database file (main + WAL + SHM): ${fileScan.leakCount} hit(s) in raw file bytes (${formatDatabaseFileSizes(fileScan.files)})`;
+  }
+  return `- ${checkbox(false)} No plaintext PHI in the benchmark database file (main + WAL + SHM): unavailable on this build — not COR-88 evidence`;
 }
 
 const MICRO_LABELS: Record<MicroOperation, string> = {
@@ -660,7 +703,7 @@ export function reportToMarkdown(report: DeviceBenchmarkReport): string {
     `- **Device Model:** ${describeDevice(t)}`,
     `- **OS Version:** ${orUnknown(t.osName)} ${orUnknown(t.osVersion)} (${t.platform})`,
     `- **Chipset / Arch:** ${orUnknown(t.architecture)}`,
-    `- **Build:** ${describeBuild(t.buildMode)}`,
+    `- **Build:** ${describeBuild(t.buildMode, t.benchmarkFlag)}`,
     '- **Battery / Power Mode:** _fill in: battery %, on charger, Low Power Mode / Battery Saver off_',
     `- **Storage Layer:** expo-sqlite with app-level ${report.encryption.cipher} field encryption (${report.encryption.cipherProvider}); key in SecureStore (iOS Keychain / Android Keystore), canary-verified. The database file itself is not encrypted (not SQLCipher).`,
     '',
@@ -691,7 +734,8 @@ export function reportToMarkdown(report: DeviceBenchmarkReport): string {
     '',
     '#### 3. Cryptographic & Data Integrity Verification',
     '',
-    `- ${checkbox(i.plaintextScan.passed)} Zero plaintext exposure verified in local application sandbox files (every raw row of the ${i.plaintextScan.tablesScanned} data tables in the benchmark SQLite database scanned: ${i.plaintextScan.rowsScanned} rows, ${i.plaintextScan.leakCount} hits)`,
+    `- ${checkbox(i.plaintextScan.passed)} Zero plaintext exposure in benchmark data tables (every raw row of the ${i.plaintextScan.tablesScanned} data tables scanned: ${i.plaintextScan.rowsScanned} rows, ${i.plaintextScan.leakCount} hits)`,
+    fileScanMarkdownLine(i.fileScan),
     `- ${checkbox(i.wrongKeyRejected.passed)} Sensitive fields in the SQLite database unreadable without the SecureStore encryption key (a wrong key is rejected by the canary and reads are refused). Note: COR-71 encrypts the sensitive fields, not the whole file; structural columns (ids, dates, status, times, stock counts) are plaintext by design.`,
     `- ${checkbox(i.atomicRollback.passed)} Atomic transactions properly roll back without corrupted records on simulated write failure`,
     '',

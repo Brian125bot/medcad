@@ -1,7 +1,9 @@
 // App entry point for the COR-71 storage layer.
 // This is the ONLY module (besides screens) allowed to import the expo-* adapters.
-import { deleteDatabaseAsync } from 'expo-sqlite';
+import { File } from 'expo-file-system';
+import { deleteDatabaseAsync, openDatabaseAsync } from 'expo-sqlite';
 import { createStorageContext, VAULT_KEY_ID, type StorageContext } from './context';
+import { basenameOnly, isBenchmarkDatabaseFile, type DatabaseFileBytes } from './database-file-scan';
 import type { BenchmarkEnvironment } from './device-benchmark';
 import type { StoragePlatform } from './context';
 import { collectStorageDiagnostics, runKeyLossRecoveryCheck, type KeyLossRecoveryResult, type StorageDiagnostics } from './diagnostics';
@@ -43,6 +45,18 @@ export async function getAppStorageDiagnostics(): Promise<StorageDiagnostics> {
 export const BENCHMARK_DATABASE_NAME = 'cadencerx-benchmark.db';
 export const BENCHMARK_KEYSTORE_SERVICE = 'app.cadencerx.benchmark';
 
+async function readSidecarBytes(dbPath: string, suffix: '' | '-wal' | '-shm'): Promise<DatabaseFileBytes | null> {
+  const path = suffix ? `${dbPath}${suffix}` : dbPath;
+  const name = suffix ? `${basenameOnly(dbPath)}${suffix}` : basenameOnly(dbPath);
+  try {
+    const file = new File(path);
+    const buffer = await file.arrayBuffer();
+    return { name, bytes: new Uint8Array(buffer) };
+  } catch {
+    return suffix === '' ? null : null;
+  }
+}
+
 export function createBenchmarkEnvironment(): BenchmarkEnvironment {
   const keystore = expoKeystore(BENCHMARK_KEYSTORE_SERVICE);
   return {
@@ -51,6 +65,26 @@ export function createBenchmarkEnvironment(): BenchmarkEnvironment {
       cipher: expoCipher(),
       keystore,
     }),
+    async readDatabaseFiles() {
+      let probe: Awaited<ReturnType<typeof openDatabaseAsync>> | null = null;
+      try {
+        probe = await openDatabaseAsync(BENCHMARK_DATABASE_NAME);
+        const dbPath = probe.databasePath;
+        if (!isBenchmarkDatabaseFile(dbPath, BENCHMARK_DATABASE_NAME)) return null;
+        const main = await readSidecarBytes(dbPath, '');
+        if (!main) return null;
+        const files: DatabaseFileBytes[] = [main];
+        const wal = await readSidecarBytes(dbPath, '-wal');
+        if (wal) files.push(wal);
+        const shm = await readSidecarBytes(dbPath, '-shm');
+        if (shm) files.push(shm);
+        return files;
+      } catch {
+        return null;
+      } finally {
+        await probe?.closeAsync().catch(() => undefined);
+      }
+    },
     async destroy() {
       await keystore.deleteItem(VAULT_KEY_ID);
       try {

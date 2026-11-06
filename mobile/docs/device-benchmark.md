@@ -36,11 +36,18 @@ write, the indexed read and the 5-row encrypted batch: the cold run's first
 sample, the warm average, and p50 / p95 / max over every sample. The original
 `< 15 ms` write target is judged on the single-write **p95**.
 
-Integrity checks (any failure makes the overall result **FAIL**):
+Integrity checks (any failure makes the overall result **FAIL**, except file
+scan `unavailable` which does not fail the run):
 
-- **No plaintext:** every raw row of `medications`, `time_slots`, `dose_logs` and
+- **Table scan:** every raw row of `medications`, `time_slots`, `dose_logs` and
   `user_preferences` is scanned for the synthetic dataset's sentinel strings
   (names, strengths, notes, prescriber, pharmacy). Only counts are reported.
+- **File scan:** while the benchmark database is still open, raw bytes of
+  `cadencerx-benchmark.db` and its `-wal` / `-shm` sidecars (if present) are read
+  via `expo-file-system` and searched for the same sentinels. States:
+  `passed` (0 hits), `failed` (any hit → overall **FAIL**), or `unavailable`
+  (no device file API — not COR-88 evidence). Only basenames and byte sizes appear
+  in the report, never matched content or full paths.
 - **Wrong key:** a read-only keystore wrapper supplies a freshly generated wrong
   key. `validateVault()` must return false and repository reads must throw
   (`VaultKeyMissingError`). The real key, and even the benchmark key, are never
@@ -58,15 +65,17 @@ status per operation, then the `runBenchmark()` p50 / p95 table and a
 `write target met / not met` line), *3. Cryptographic & Data Integrity Verification* (each
 box is ticked only if that check passed in this run) and *4. Milestone
 Sign-Off*, which never claims M1 is complete: sign-off is left pending Brian's
-review. The JSON report (`cadencerx.cor88.device-benchmark/v2`) is appended in a
+review. The JSON report (`cadencerx.cor88.device-benchmark/v3`) is appended in a
 collapsed block. Section 1 includes a **Build** line (`debug` / `release`, from
-`__DEV__`; only release figures are quotable) and a *Battery / Power Mode* line
-to fill in by hand.
+`__DEV__`; only release figures are quotable; release with
+`EXPO_PUBLIC_COR88_BENCHMARK=1` at build time adds
+`enabled by EXPO_PUBLIC_COR88_BENCHMARK`) and a *Battery / Power Mode* line to
+fill in by hand.
 
-The second integrity box is worded as "sensitive fields unreadable without the
-key" because COR-71 encrypts fields, not the file. The first box's scan covers
-the raw rows of the benchmark database's data tables, not every file in the
-app sandbox.
+The wrong-key box is worded as "sensitive fields unreadable without the key"
+because COR-71 encrypts fields, not the file. The table-scan box covers raw
+rows; the file-scan box covers on-disk bytes of the benchmark database only
+(never the app vault).
 
 ## Diagnostics and key-loss recovery
 
@@ -103,7 +112,10 @@ issues `PRAGMA key`.
 - The dataset is synthetic. Nothing is logged; the report holds telemetry,
   timings, counts and pass/fail flags only. On failure the screen shows the
   error class name only.
-- The screen redirects to Today in production builds (`!__DEV__`).
+- The screen and Theme tab redirect to Today in production unless
+  `EXPO_PUBLIC_COR88_BENCHMARK=1` was set when the JS bundle was built (read
+  only in `app/cor88-benchmark-access.ts` so Metro inlines it). Never commit that
+  flag in `.env` or production EAS profiles.
 
 ## Telemetry
 
@@ -142,10 +154,7 @@ Protocol, per platform:
 4. Repeat steps 2–3 twice more (three cold launches total) so one noisy run
    doesn't decide the verdict.
 5. Debug builds run the JS through Metro with dev checks on. For numbers to
-   quote, also run a release-mode build:
-   `npx expo run:ios --device --configuration Release` or
-   `npx expo run:android --device --variant release`. The screen is dev-only, so
-   for a release-mode run temporarily allow it (do not commit that change), or
-   record that the figures are debug-build figures.
+   quote, run a release build with the flag (see
+   [cor-88-device-run-package.md](cor-88-device-run-package.md) §1).
 6. Update COR-71/COR-88 and the storage.md benchmark section with the measured
    numbers, whether they confirm or contradict the targets.
