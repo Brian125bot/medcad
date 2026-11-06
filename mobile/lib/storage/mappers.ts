@@ -8,6 +8,7 @@ import {
   type ScheduleFrequency,
   type TimeOfDayBlock,
 } from '../domain/medication-data';
+import { isValidDateKey } from '../schedule/date-keys';
 import type { MedicationRow, TimeSlotRow } from './schema';
 
 export interface MedicationPhi {
@@ -21,6 +22,7 @@ export interface MedicationPhi {
   inventory_pharmacy_note?: string | null;
   appearance?: PillAppearance | null;
   alert?: MedicationAlert | null;
+  calendar_synced_fill_date?: string | null;
 }
 
 export interface TimeSlotPhi {
@@ -40,6 +42,8 @@ export interface StoredMedicationRow extends MedicationRow {
   appearance?: unknown;
   /** COR-76 reminder sound/vibration; untrusted on read like appearance. */
   alert?: unknown;
+  /** COR-94 calendar-sync marker; untrusted on read like appearance. */
+  calendar_synced_fill_date?: unknown;
 }
 
 export interface StoredTimeSlotRow extends TimeSlotRow {
@@ -68,6 +72,7 @@ export function domainMedicationToRows(med: Medication): {
       prescriber: med.prescriber || null,
       appearance: med.appearance ? { ...med.appearance } : null,
       alert: med.alert ? { sound: med.alert.sound, vibrate: med.alert.vibrate } : null,
+      calendar_synced_fill_date: med.inventory?.calendarSyncedFillDate ?? null,
       active: med.active ? 1 : 0,
       inventory_current: med.inventory?.currentUnits ?? 0,
       inventory_capacity: med.inventory?.capacityUnits ?? 0,
@@ -147,6 +152,9 @@ export function rowsToDomainMedication(
       nextFillDate: medRow.inventory_next_fill_date || undefined,
       pharmacyNote: medRow.inventory_pharmacy_note || undefined,
       googleCalendarEventId: medRow.inventory_calendar_event_id || undefined,
+      ...(typeof medRow.calendar_synced_fill_date === 'string' && isValidDateKey(medRow.calendar_synced_fill_date)
+        ? { calendarSyncedFillDate: medRow.calendar_synced_fill_date }
+        : {}),
     },
   };
 }

@@ -104,7 +104,7 @@ Medication
 │    └─ reminderEnabled?, leadMinutes?   (null/undefined = inherit global lead)
 ├─ inventory               currentUnits, capacityUnits, lowThresholdUnits,
 │                          lastRefilledAt, nextFillDate?, pharmacyNote?,
-│                          googleCalendarEventId?
+│                          googleCalendarEventId?, calendarSyncedFillDate?
 └─ active                  false = paused/ended; never scheduled
 
 DoseLogEntry

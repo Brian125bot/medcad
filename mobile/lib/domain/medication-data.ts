@@ -82,6 +82,8 @@ export interface MedicationInventory {
   nextFillDate?: string; // YYYY-MM-DD scheduled fill date in tool & Google Calendar
   pharmacyNote?: string; // e.g., "CVS Pharmacy #4102 · Rx #884920"
   googleCalendarEventId?: string; // Synced Google Calendar event ID
+  /** YYYY-MM-DD `nextFillDate` the linked calendar event reflects; written only by calendar sync. */
+  calendarSyncedFillDate?: string;
 }
 
 export interface Medication {

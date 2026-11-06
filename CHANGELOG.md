@@ -37,6 +37,13 @@ the issue id and PR number where there are any.
 - **[mobile]** `"engines": { "node": ">=22.13" }` and `mobile/.nvmrc` (`22`).
   The storage tests need `node:sqlite`, which ships unflagged from Node 22.13.
 
+### Changed
+- **[mobile]** `nextFillDate` is refreshed from the shared supply projection at
+  supply-edit boundaries (wizard save, refill, pause/resume); edits that do not
+  change supply leave the stored date alone, dose logging does not recompute it,
+  and a sealed `calendarSyncedFillDate` marker flags linked calendar events for
+  the calendar-sync ticket. *(COR-94)*
+
 ### Fixed
 - **[mobile]** Permission revoke cancels scheduled `cx.dose.*` reminders (COR-98).
   After grant → schedule → revoke, `ReminderEngine` no longer returns while OS

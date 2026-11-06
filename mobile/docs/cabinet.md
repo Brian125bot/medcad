@@ -41,10 +41,13 @@ before the persist promise exists, then the write goes through
 serialized so concurrent refills cannot interleave. On failure only that refill's
 own units roll back and `SAVE_ERROR_MESSAGE` is shown.
 
-`lastRefilledAt` is a civil date key (`toDateKey`), never a UTC slice.
-`nextFillDate` and `googleCalendarEventId` are left untouched (recalculation is
-COR-94). Stock above capacity is allowed; the bar caps at 100% while the number
-shows the true units.
+`lastRefilledAt` and the refresh `todayKey` are civil date keys (`toDateKey`),
+never UTC slices. `refillMedication` rebuilds stock immutably and runs
+`refreshNextFillDate`, so `nextFillDate` moves only when the refill changes the
+shared supply projection; `googleCalendarEventId` and the sealed
+`calendarSyncedFillDate` marker are carried for the calendar-sync ticket. Stock
+above capacity is allowed; the bar caps at 100% while the number shows the true
+units.
 
 ## Low-stock alerts
 

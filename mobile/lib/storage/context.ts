@@ -4,6 +4,7 @@ import { CURRENT_DATABASE_SCHEMA_VERSION, DATABASE_NAME, DDL_STATEMENTS } from '
 import type { DoseSlotSnapshot, TimeSlot } from '../domain/medication-data';
 import { isDoseSlotSnapshot, toDoseSlotSnapshot } from '../domain/medication-data';
 import { isValidDateKey, toDateKey } from '../schedule/date-keys';
+import { refreshNextFillDate } from '../schedule/fill-date';
 import { MAX_REFILL_UNITS } from '../schedule/supply';
 
 export const VAULT_KEY_ID = 'cadencerx.vault.key.v1';
@@ -189,6 +190,7 @@ async function encryptMedicationRow(
     (row as { inventory_pharmacy_note?: string | null }).inventory_pharmacy_note ?? null;
   const appearance = (row as { appearance?: unknown }).appearance ?? null;
   const alert = (row as { alert?: unknown }).alert ?? null;
+  const calendarSyncedFillDate = (row as { calendar_synced_fill_date?: unknown }).calendar_synced_fill_date ?? null;
   const phi = {
     name: typeof name === 'string' ? name : String(name ?? ''),
     generic_name: genericName,
@@ -200,6 +202,7 @@ async function encryptMedicationRow(
     inventory_pharmacy_note: pharmacyNote,
     appearance,
     alert,
+    calendar_synced_fill_date: calendarSyncedFillDate,
   };
   return {
     id: row.id,
@@ -737,22 +740,25 @@ export class MedicationRepository {
     this.emitChange({ type: 'medication-deleted', medicationId: id });
   }
 
-  public async toggleActiveMedication(id: string) {
+  public async toggleActiveMedication(id: string, todayKey: string) {
+    if (!isValidDateKey(todayKey)) {
+      throw new RangeError(`Invalid toggle date key: ${todayKey}`);
+    }
     await this.ensureReady();
     const row = await this.getMedicationRow(id);
     if (!row) return null;
     const medication = await this.getMedicationById(id);
     if (!medication) return null;
-    medication.active = !medication.active;
-    await this.saveMedication(medication);
-    return medication;
+    const toggled = { ...medication, active: !medication.active };
+    return this.saveMedication(refreshNextFillDate({ previous: medication, next: toggled, todayKey }));
   }
 
   /**
    * Adds `unitsToAdd` to stock and stamps `lastRefilledAt` with the caller's
    * civil `todayKey` (never a UTC slice). Uses COR-95's `inventoryBaseline` so a
-   * dose logged between the read and the save is preserved. `nextFillDate` and
-   * `googleCalendarEventId` are left untouched (COR-94 owns them).
+   * dose logged between the read and the save is preserved. COR-94 refreshes
+   * `nextFillDate` from the shared supply projection; the calendar event id and
+   * synced-date marker are carried for the calendar-sync ticket.
    */
   public async refillMedication(id: string, unitsToAdd: number, todayKey: string, notes?: string) {
     if (!Number.isFinite(unitsToAdd) || unitsToAdd <= 0 || unitsToAdd > MAX_REFILL_UNITS) {
@@ -765,10 +771,16 @@ export class MedicationRepository {
     const medication = await this.getMedicationById(id);
     if (!medication) return null;
     const baseline = medication.inventory.currentUnits;
-    medication.inventory.currentUnits = baseline + unitsToAdd;
-    medication.inventory.lastRefilledAt = todayKey;
-    if (notes !== undefined) medication.inventory.pharmacyNote = notes;
-    return this.saveMedication(medication, { inventoryBaseline: baseline });
+    const next: import('../domain/medication-data').Medication = {
+      ...medication,
+      inventory: {
+        ...medication.inventory,
+        currentUnits: baseline + unitsToAdd,
+        lastRefilledAt: todayKey,
+        ...(notes !== undefined ? { pharmacyNote: notes } : {}),
+      },
+    };
+    return this.saveMedication(refreshNextFillDate({ previous: medication, next, todayKey }), { inventoryBaseline: baseline });
   }
 
   public async bulkSaveMedications(meds: import('../domain/medication-data').Medication[]): Promise<void> {

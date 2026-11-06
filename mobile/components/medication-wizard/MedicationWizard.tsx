@@ -15,6 +15,7 @@ import {
 import { cadenceTokens } from "@/constants/theme";
 import type { Medication, ScheduleFrequency } from "@/lib/domain/medication-data";
 import { ensureReminderPermission, maybePromptForExactAlarm } from "@/lib/notifications";
+import { toDateKey } from "@/lib/schedule/date-keys";
 import {
   firstInvalidStep,
   formToMedication,
@@ -96,7 +97,7 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
     setSaving(true);
     setSaveError(null);
     try {
-      const med = formToMedication(state, { newId: randomUUID, existing });
+      const med = formToMedication(state, { newId: randomUUID, existing, todayKey: toDateKey(new Date()) });
       await onSave(med);
       // COR-76: reminders default on, so the first save is when we ask for notification permission.
       if (med.active && med.timeSlots.some((slot) => slot.reminderEnabled !== false)) void ensureReminderPermission().then(() => maybePromptForExactAlarm());
