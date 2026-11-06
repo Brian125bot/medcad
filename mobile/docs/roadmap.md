@@ -3,14 +3,18 @@
 Where the mobile app stands against its plan, what is unfinished or fragile, and
 what depends on what. **Linear is the source of truth** — project
 [CadenceRx Mobile v1.0](https://linear.app/coretek/project/cadencerx-mobile-v10-c1c5474d54a2)
-(team `COR`). This page is a snapshot taken on **2026-11-05** (`main` at `aa496fc`, PR #18); when it
-disagrees with Linear, Linear wins, and this page should be updated.
+(team `COR`). This page is a snapshot taken on **2026-11-06** (`main` at `7d72238`,
+after PRs #19–#24); when it disagrees with Linear, Linear wins, and this page
+should be updated.
 
-> **The one-sentence status:** the data layer (encrypted storage, schedule
-> engine) is built and well tested under Node; Today and the add/edit medication
-> wizard are built in code; nothing has been run on a device yet (COR-88,
-> COR-91). Bundling works after COR-90 restored the Space Mono font. M1 and M2
-> are code-complete apart from that device verification; M3–M6 have not started.
+> **The one-sentence status:** encrypted storage, the schedule engine, Today, the
+> add/edit wizard, the reminder engine (COR-76) and lock-screen actions (COR-77)
+> are built and tested under Node. Nothing has been run on a device
+> (COR-88 storage numbers, COR-91 wizard, COR-97 reminders). The Linear project
+> is **In Progress**. M1 and M2 are code-complete apart from that device
+> verification; M3 is code-complete for COR-76 and COR-77, with device QA in
+> progress and two residuals filed (COR-98, COR-99). M4–M6 have not started.
+> There is no CI on `main` (PR #17 was closed unmerged; nearest issue COR-87).
 
 ## Milestones and issues
 
@@ -23,14 +27,14 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-70 | Scaffold Expo project and theme tokens | 3 | Done |
 | COR-71 | Local encrypted SQLite / storage layer | 5 | Done *(performance criterion unverified — see COR-88)* |
 | COR-72 | Port and optimise schedule frequency and streak engine | 3 | Done |
-| COR-88 | Verify COR-71 on a physical device; record a real benchmark | 3 | **In Progress** *(PR #16 merged the benchmark harness only, no device numbers yet; Linear had closed the issue on 2026-10-16 and it was reopened on 2026-11-05. Run sheet: [cor-88-device-run-package.md](cor-88-device-run-package.md))* |
+| COR-88 | Verify COR-71 on a physical device; record a real benchmark | 3 | **In Progress** *(harness and run sheet are on `main` via PR #16 and PR #21; no device numbers. Linear closed the issue on 2026-10-16 and again on 2026-11-06, then reopened it the same day because the device criteria are still unchecked. Run sheet: [cor-88-device-run-package.md](cor-88-device-run-package.md))* |
 
 ### M2 — Native UI and dose interaction
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
 | COR-73 | Bottom tab navigation and headers | 3 | **Done** | PR #10 + agreed-design follow-up (header, icons, Theme tab, Regimen) |
-| COR-74 | Daily protocol screen with swipe gestures | 5 | **Done** | PR #12. [today-screen.md](today-screen.md). Snooze waits for COR-76; not device-tested (COR-91). Blocks COR-77 |
+| COR-74 | Daily protocol screen with swipe gestures | 5 | **Done** | PR #12. [today-screen.md](today-screen.md). Today still has no Snooze control; lock-screen Snooze is COR-77. Not device-tested (COR-91) |
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | **Done** | Delivered by PR #8 (appearance in the encrypted payload, no migration) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | **Done** | `SpaceMono-Regular.ttf` + OFL in `assets/fonts/` |
@@ -43,8 +47,11 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
-| COR-76 | Native background alarm and notification engine | 5 | In review | Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Not device-tested; Android exact-alarm access comes from the local `modules/exact-alarm` module, which is unbuilt until the first development build |
-| COR-77 | Interactive lock-screen notification actions | 5 | In review | Take / Snooze 15m / Skip; dedupe, pending-only actions, iOS unlock, dismiss, stale snooze cleanup, custom entry; device checklist in [notifications.md](notifications.md) |
+| COR-76 | Native background alarm and notification engine | 5 | **Done** (code) | PR #20 (`5953af3`), 2026-11-06. Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Device QA is COR-97. The local `modules/exact-alarm` module is unbuilt until the first development build |
+| COR-77 | Interactive lock-screen notification actions | 5 | **Done** (code) | PR #22 (`828b295`) and remediation PR #23 (`7929a42`), 2026-11-06. Take / Snooze 15m / Skip; device checklist in [notifications.md](notifications.md), covered by COR-97 |
+| COR-97 | Device QA of the COR-76 reminder engine on iOS and Android | 1 | **In Progress** | Checklist in [notifications.md](notifications.md). Same development build as COR-88 and COR-91. No device evidence yet |
+| COR-98 | Cancel `cx.dose.*` when notification permission is revoked | – | Backlog | Filed 2026-11-06. On permission denied the reconciler reports `scheduledCount: 0` without cancelling already scheduled `cx.dose.*` entries |
+| COR-99 | Do not attach dose actions to sentinel or window-end reminders | – | Backlog | Filed 2026-11-06. `expo-scheduler` defaults `categoryIdentifier` to `dose_reminder`, and `hashReminderContent` omits it, so sentinels can show Take / Snooze / Skip |
 
 ### M4 — Cabinet, refills and calendar sync
 
@@ -83,6 +90,12 @@ that are not recorded here.
 
 ## Recently merged
 
+- **PR #24** (`7d72238`) — storage transactions pass a scoped driver into the callback (so work inside the transaction stays on that connection), and foreground presentation no longer plays a sound for silent reminders.
+- **PR #23** (`7929a42`) — COR-77 remediation: dedupe, pending-only actions, iOS unlock, dismiss, stale snooze cleanup.
+- **PR #22** (`828b295`) — COR-77 lock-screen Take / Snooze 15m / Skip.
+- **PR #21** (`83dcdf1`) — COR-88 harness v2 (p50/p95, release verdict), native transaction atomicity, Android build fixes, device-run package. No device numbers.
+- **PR #20** (`5953af3`) — COR-76 reminder engine and post-save hook.
+- **PR #19** (`73345d7`) — docs sync to the 2026-11-05 / `aa496fc` snapshot. This page replaces that snapshot.
 - **PR #18** (`aa496fc`) — COR-93: dose history survives removing a slot or a medication.
 - **PR #16** (`d5404b4`) — COR-88 device benchmark harness and dev-only screen. Tooling only: no device numbers yet.
 - **PR #15** (`334dc19`) — COR-90 follow-up: a font load failure no longer crashes the app shell.
@@ -97,22 +110,27 @@ that are not recorded here.
     encrypted payload so no migration is needed (old rows simply have no
     `appearance`). Close COR-89 as done, or rewrite it (for example to add a
     list-row `PillPreview`).
-- **COR-88** — device verification of the storage layer, in progress: harness
-  and run sheet ([cor-88-device-run-package.md](cor-88-device-run-package.md))
-  ready, physical iOS + Android run outstanding.
+- **COR-88** — device verification of the storage layer, in progress again as
+  of 2026-11-06: harness and run sheet
+  ([cor-88-device-run-package.md](cor-88-device-run-package.md)) are on `main`,
+  physical iOS and Android numbers are not. Do not record device numbers here
+  until a hardware run produces them.
 
 ## Suggested order (from the dependency graph)
 
-1. **COR-91 / COR-88 on-device** — COR-90 unblocked bundling; run storage and
-   wizard QA on iOS/Android next.
+1. **COR-91 / COR-88 / COR-97 on-device** — COR-90 unblocked bundling. One
+   development build covers storage numbers, wizard QA and the reminder
+   checklist. COR-88 and COR-97 are In Progress; COR-91 is still Backlog.
 2. **Device QA of COR-74 (Today)** — gestures, haptics, ring and layout have
    only been type-checked.
 3. ~~**COR-93**~~ — done (PR #18): orphan logs keep a `slotSnapshot` and count
    as history; Today shows current slots only.
-4. **COR-76** — in review (PR #20). Its acceptance checklist
-   ([notifications.md](notifications.md#device-acceptance-checklist)) needs a
-   device, and `expo-notifications` plus the local `exact-alarm` module are
-   native, so it needs a development build — the same build item 1 needs.
+4. ~~**COR-76 / COR-77**~~ — Done in code (PRs #20, #22, #23). The acceptance
+   checklist ([notifications.md](notifications.md#device-acceptance-checklist))
+   is COR-97. Filed residuals: COR-98 (permission revoke does not cancel
+   `cx.dose.*`) and COR-99 (sentinel / window-end still get the dose action
+   category). `expo-notifications` and the local `exact-alarm` module are
+   native, so the checklist needs the same development build as item 1.
 5. **COR-94** — pure functions, no device. Land it before COR-79 (calendar sync).
 
 ## Known gaps and sharp edges
@@ -131,12 +149,12 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 8 | ~~No notification hook~~ **Handled** | Every repository mutation (including `deleteMedication`, dose logs and preferences) emits a post-commit change event; the reminder engine reschedules from it | [notifications.md](notifications.md) | COR-76 |
 | 9 | Migration runner is a single step | There is no per-version logic, and the audit-row text is hard-coded to v1. Adding a v2 needs the ordered-step structure first (not needed for payload-only fields) | [storage.md](storage.md#schema-versions-and-migrations) | Untracked (becomes necessary with the first column change) |
 | 10 | No delete / pause UI | `deleteMedication` and `toggleActiveMedication` exist but no screen calls them | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |
-| 11 | No CI | `.github/` does not exist on `main` (a workflow sits unmerged on branch `ci-github-actions`, `bbdacf3`); the local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
+| 11 | No CI | `.github/` does not exist on `main`. PR #17 (`ci-github-actions`, `bbdacf3`) was closed unmerged on 2026-11-06. The local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
 | 12 | `mobile/` isn't self-contained | Two parity specs import the web module at the repo root, so they fail if `mobile/` is checked out alone | [architecture.md](architecture.md#8-relationship-to-the-web-prototype) | Untracked |
 | 13 | Legacy duplication in the domain module | Web-parity copies of schedule helpers (and duplicate `buildDoseKey` / `toDateKey`) sit beside the hardened `lib/schedule` versions | [architecture.md](architecture.md#7-legacy-duplication) | Untracked |
 | 14 | Scaffold leftovers | `app/modal.tsx`, `EditScreenInfo`, the Themed components and the dev-only Theme tab (`app/(tabs)/two.tsx`) are template code. The scaffold tabs were replaced in COR-73 | [architecture.md](architecture.md#2-module-map) | Untracked |
 | 15 | `app.json` has no `ios.bundleIdentifier` / `android.package` | EAS builds and store submission need them | `mobile/app.json` | Untracked (release work, COR-87) |
-| 16 | No component tests; the 100 % coverage gate covers only `lib/schedule`, `lib/wizard`, `lib/today`, `lib/storage/device-benchmark.ts` and `lib/storage/diagnostics.ts` | UI regressions are caught only by hand. The rest of storage (repository, mappers, vault) has tests but no coverage threshold | [development.md](development.md#testing) | Untracked |
+| 16 | No component tests; the 100 % coverage gate covers `lib/schedule`, `lib/wizard`, `lib/today`, `lib/notifications` (not the Expo adapters), and `lib/storage/{benchmark-access,database-file-scan,device-benchmark,diagnostics}.ts` | UI regressions are caught only by hand. The rest of storage (repository, mappers, vault) has tests but no coverage threshold | [development.md](development.md#testing) | Untracked |
 | 17 | UTC date slicing in the repository | `refillMedication` sets `inventory.lastRefilledAt` and demo seeding derives its `todayKey` with `new Date().toISOString().slice(0, 10)`, which is the **UTC** date: in a negative-offset zone it is already tomorrow in the evening (e.g. after 18:00 in Chicago in winter). The project rule is to use `toDateKey` from `lib/schedule/date-keys.ts`. `refillMedication` has no UI caller yet; COR-78's refill buttons will be the first | `lib/storage/context.ts` (`refillMedication`; `seedDemoVault` call and `createInitialSeedData` fallback) | Untracked |
 
 ## Where the web prototype fits
@@ -147,5 +165,5 @@ being extended; mobile ports logic from it and uses its `lib/medication-data.ts`
 as the oracle for parity tests. When a Linear issue or a web document says
 "COR-76" it is worth checking which one is meant — the web code and tests use
 that number for the web notification engine, while Linear COR-76 is the mobile
-one, still in the backlog. See
+one, Done in code under `mobile/lib/notifications/` (device QA is COR-97). See
 [architecture.md](architecture.md#8-relationship-to-the-web-prototype).

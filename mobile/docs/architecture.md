@@ -199,16 +199,17 @@ screen calls both through `TodayStore`, optimistically with rollback
 implementations of `isMedicationScheduledOnDate`, `getScheduledDosesForDate`,
 `estimateDaysOfSupplyRemaining`, `computeAdherenceAnalytics`, and an older set
 of date helpers (including a millisecond-based `diffDaysBetweenKeys`). The
-hardened versions live in `lib/schedule/`. Of everything in that file, only
-three functions are still called — all from `lib/storage/context.ts`, none
-from `app/`, `components/` or the other `lib/` folders: `buildDoseKey`
-(`logDose`, `undoDose`, `logDoseAt`), `toDateKey` (`resetSampleData`) and
-`createInitialSeedData` (demo seeding). The schedule helpers
-(`isMedicationScheduledOnDate`, `getScheduledDosesForDate`,
-`estimateDaysOfSupplyRemaining`, `computeAdherenceAnalytics`,
-`diffDaysBetweenKeys`, …) have no callers and are kept for web parity (checked
-by grep on 2026-10-16). `lib/schedule` re-exports its own `buildDoseKey` and
-`toDateKey`, so the domain copies are pure duplication.
+hardened versions live in `lib/schedule/`. Production code still calls the
+domain copies of `buildDoseKey` (`lib/storage/context.ts` and
+`lib/storage/device-benchmark.ts`), `toDateKey` and `createInitialSeedData`
+(`context.ts`), plus `isDoseSlotSnapshot` / `toDoseSlotSnapshot` (`context.ts`).
+The schedule helpers in that file (`isMedicationScheduledOnDate`,
+`getScheduledDosesForDate`, `estimateDaysOfSupplyRemaining`,
+`computeAdherenceAnalytics`, `diffDaysBetweenKeys`, …) are not called from
+`app/`, `components/` or other `lib/` modules (re-checked by grep on
+2026-11-06). `tests/repository.test.ts` still imports the domain
+`getScheduledDosesForDate`. `lib/schedule` re-exports its own `buildDoseKey`
+and `toDateKey`, so those domain copies are duplication for new code.
 **New code should import from `lib/schedule`.**
 Consolidating the two is tracked as tech debt in the
 [roadmap](roadmap.md#known-gaps-and-sharp-edges).
@@ -229,4 +230,4 @@ the mobile app. It is being replaced, not extended.
 - Issue numbers overlap: the web app already ships a notification engine
   (referred to as "COR-76" in web docs and tests), while the *Linear* issue
   COR-76 is the **mobile** notification engine in `mobile/lib/notifications/`
-  ([notifications.md](notifications.md)).
+  ([notifications.md](notifications.md)), Done in code; device QA is COR-97.

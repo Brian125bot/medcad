@@ -4,10 +4,11 @@ Docs for the Expo / React Native app in `mobile/`. Start with **Architecture**,
 use **Development** to get a working checkout, and keep **Roadmap** open to
 know what is real and what is only planned.
 
-Everything here was checked against the code on **2026-10-16** (commit history
-through `f37e178`, Node 22.22.0). Behavioural claims were verified by running
-the repository code, not only by reading it; where something is *not*
-verified — usually anything that needs a device — the page says so.
+Status claims were checked against the code on **2026-11-06** (`main` at
+`7d72238`, Node 22). Behavioural claims below were verified by reading that
+tree and, where an older page says so, by running the repository; anything
+that needs a device is still unverified, and no device benchmark numbers are
+recorded here.
 
 ## Read in this order
 
@@ -43,9 +44,11 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test   # th
   encrypted at rest; never log them; use obviously fake data in tests.
 - **Dates are strings.** A day is a local `YYYY-MM-DD` key, never an instant;
   there is no hidden clock — callers pass `todayKey`.
-- **There is no CI.** The local gate above is the only check.
-- **Device QA is still pending** (COR-88, COR-91). Bundling works after COR-90;
-  tests, typecheck and lint are the local gate until CI exists.
+- **There is no CI on `main`.** PR #17 was closed unmerged. The local gate
+  above is the only check (nearest issue: COR-87).
+- **Device QA is still pending** (COR-88 storage numbers, COR-91 wizard,
+  COR-97 reminders). Bundling works after COR-90; tests, typecheck and lint
+  are the local gate until CI exists.
 
 ## When you change X, update Y
 
@@ -56,6 +59,7 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test   # th
 | `lib/storage/` (schema, migrations, repository behaviour) | [storage.md](storage.md), and [roadmap.md](roadmap.md#known-gaps-and-sharp-edges) if you fix or add a sharp edge |
 | `lib/schedule/` rules | [schedule-engine.md](schedule-engine.md) |
 | `lib/today/`, Today UI | [today-screen.md](today-screen.md) |
+| `lib/notifications/`, reminder settings | [notifications.md](notifications.md) |
 | Wizard fields, limits, messages | [medication-wizard.md](medication-wizard.md) |
 | Commands, tooling, test layout | [development.md](development.md) |
 | Folder structure or layering | [architecture.md](architecture.md) |

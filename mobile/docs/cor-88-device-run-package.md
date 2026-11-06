@@ -141,7 +141,9 @@ p95 and say so.
 ## 5. Linear
 
 If COR-88 was auto-closed when a tooling PR merged, **reopen COR-88** before you
-record the device run (PR #16 did this on 2026-10-16).
+record the device run. That happened for PR #16 on 2026-10-16 and again after
+the harness v2 merge; as of 2026-11-06 COR-88 is **In Progress** and still has
+no device numbers. Do not mark it Done from a harness-only PR.
 
 One comment on COR-88 per platform (or one combined):
 
