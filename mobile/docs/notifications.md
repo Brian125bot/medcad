@@ -153,35 +153,64 @@ three actions on every `cx.dose.` and `cx.snooze.` reminder:
 
 | Action id | Label | Effect |
 | --- | --- | --- |
-| `TAKE_DOSE` | Take | `MedicationRepository.logDose(…, 'taken')` for every dose in `data.doses`; inventory follows the normal repository path; idempotent re-take does not double-decrement. |
-| `SNOOZE_15M` | Snooze 15m | Schedules one follow-up under `cx.snooze.<fireDateKey>.<HHmm>` (~15 minutes from the action); cancels the acted-on reminder and any matching pending `cx.dose.` for those doses; snooze entries are outside the 48-entry dose budget and are never cancelled by the dose reconciler. |
-| `SKIP_DOSE` | Skip | `logDose(…, 'skipped')` for every dose in the group; no inventory change. |
+| `TAKE_DOSE` | Take | `logDose(…, 'taken')` for every **pending** dose in `data.doses` (see below); inventory follows the normal repository path; idempotent re-take does not double-decrement. |
+| `SNOOZE_15M` | Snooze 15m | Schedules one follow-up under `cx.snooze.<fireDateKey>.<HHmm>` (~15 minutes from the action) for **pending** doses only; cancels and **dismisses** the acted-on notification; cancels matching pending `cx.dose.` entries for those doses. Snoozes sit outside the 48-entry dose budget. |
+| `SKIP_DOSE` | Skip | `logDose(…, 'skipped')` for every **pending** dose in the group; no inventory change. |
 
 Pure `planNotificationAction` maps action id + payload → repository operations;
 `executeNotificationAction` runs them through the encrypted repository and
 scheduler ports. Malformed `data` is rejected; logs record **error class names
 only** (no PHI).
 
-**Snooze suppression.** While a `cx.snooze.` entry is still scheduled
-(`fireAtMs` in the future), the reconciler reads each entry's `doseKeys` (from
-`listScheduled()`, derived from notification `data.doses` at schedule time) and
-the planner skips those doses so it does not re-arm the original `cx.dose.`
-reminder.
+**Pending-only actions.** Before Take, Skip, or Snooze runs, the executor loads
+dose logs for the payload date range and keeps only doses with no log, on an
+active medication, with a known slot. If nothing is pending, Take/Skip still
+clear the notification and refresh the badge without writing. Snooze schedules
+nothing when all doses are logged or already covered by a **future** `cx.snooze.`
+entry (`listScheduled()` `doseKeys`). Stale snooze notifications cannot flip a
+dose that was logged in-app.
 
-**Badge.** After every action and every reconcile, `setBadgeCount` sets the app
-badge to pending doses for **today** using the same `countPendingDoses` helper as
-the Today tab (`getScheduledDosesForDate` + logs). Zero pending clears the badge.
+**Dedupe.** Each action delivery is keyed by
+`notificationId|actionIdentifier|deliveredAtMs` (delivery time from
+`Notification.date`, normalized to epoch ms). A preference store
+(`notifications.handledActionResponses`, TTL 7 days, max 64) plus an in-process
+set ensures the background task, JS listener, and cold-start
+`getLastNotificationResponse()` path execute at most once. Malformed payloads and
+vault failures are not recorded. Writes to the dedupe preference do not trigger
+reconcile.
 
-**Background delivery.** `addNotificationResponseReceivedListener` handles
-actions while the app is foregrounded or backgrounded. On Android, a
-`expo-task-manager` task (`cadencerx-reminder-action`) also runs action taps
-when the app is killed; both paths call `resolveNotificationResponseContext()`,
-which lazy-loads `getStorageContext()` when the engine has not wired storage yet.
-Cold-start action taps are processed in `startReminderEngine` before navigation;
-body taps still open Today.
+**iOS unlock.** All three actions set `isAuthenticationRequired: true` on the
+category (Android ignores it). The vault key stays `WHEN_UNLOCKED` in Secure
+Store, so the user must unlock before Take/Snooze/Skip can read the vault. If
+`logDose` fails, the notification stays visible for retry; badge refresh errors
+are swallowed.
 
-**Device follow-up (not verified in CI):** extend COR-97 or run the checklist
-items below on a physical iPhone and Android development build.
+**Dismissal.** After a successful action, the executor cancels the scheduled
+alarm and calls `dismissNotificationAsync` so Android removes the notification
+from the shade (action buttons do not auto-cancel).
+
+**Snooze suppression and cleanup.** While a `cx.snooze.` entry is still scheduled
+(`fireAtMs` in the future), the reconciler reads each entry's `doseKeys` and the
+planner skips those doses so it does not re-arm the original `cx.dose.`
+reminder. Each reconcile also cancels `cx.snooze.` entries whose `doseKeys` are
+all logged or refer to missing/inactive medications. Log reads widen to the
+earliest snooze dose date when needed. **`vault-deleted`** cancels both
+`cx.dose.` and `cx.snooze.` (never `cx.refill.`).
+
+**Badge.** After every successful action and every reconcile, `setBadgeCount`
+sets the app badge to pending doses for **today** using the same helper as the
+Today tab. Zero pending clears the badge.
+
+**Background delivery and entry.** `addNotificationResponseReceivedListener` and
+the Android `expo-task-manager` task (`cadencerx-reminder-action`) both call
+`dispatchNotificationResponse()` (shared dedupe). `mobile/index.ts` imports
+`lib/notifications/background-task` **before** `expo-router/entry` so
+`TaskManager.defineTask` runs on headless Android starts; the task is not
+registered on web. Cold-start taps are processed in `startReminderEngine` before
+navigation; body taps still open Today.
+
+**Device follow-up (not verified in CI):** run the checklist items below on a
+physical iPhone and Android development build.
 
 ## Device acceptance checklist
 
@@ -207,8 +236,10 @@ Not verified by the author — run on a physical iPhone and Android phone:
 - [ ] Cold-start the app on iOS with 48 entries scheduled: the first reconcile cancels and schedules nothing
 - [ ] Set `PLANNING_HORIZON_DAYS` to 2 locally with a light regimen: the window-end sentinel fires at 09:00 on the last day
 - [ ] A 20-minute lead time set in the wizard shows as a selected chip in settings
-- [ ] **COR-77:** Take from lock screen logs the dose, decrements stock, clears the reminder, updates the badge, without opening the app
-- [ ] **COR-77:** Skip from lock screen marks skipped and updates the badge
-- [ ] **COR-77:** Snooze schedules a follow-up ~15 minutes later; the original dose reminder is not still pending
-- [ ] **COR-77:** Grouped notification applies the chosen action to every dose in the group
-- [ ] **COR-77:** Badge matches remaining pending doses for today
+- [ ] **COR-77:** Android (backgrounded): Take, Snooze, and Skip each run once; one snooze is scheduled; the notification leaves the shade
+- [ ] **COR-77:** Android (force-stopped): an action works headless; the next launch does not replay it (no second snooze, `logged_at` unchanged)
+- [ ] **COR-77:** iPhone locked: Take prompts Face ID / passcode, then logs; canceling unlock leaves the dose pending
+- [ ] **COR-77:** Snooze, then take in-app: reconcile cancels the snooze; if it already fired, Skip on it does not change the taken dose
+- [ ] **COR-77:** Delete vault with a snooze pending: the snooze is cancelled
+- [ ] **COR-77:** Badge matches today's pending count after each action
+- [ ] **COR-77:** Grouped notification applies the chosen action to every **pending** dose in the group

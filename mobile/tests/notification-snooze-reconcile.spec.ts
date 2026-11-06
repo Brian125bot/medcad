@@ -64,6 +64,9 @@ describe('snooze suppression via scheduler doseKeys', () => {
       async getPreference<T>(key: string, fallback: T): Promise<T> {
         return (repository.prefs.has(key) ? repository.prefs.get(key) : fallback) as T;
       },
+      async setPreference<T>(key: string, value: T): Promise<void> {
+        repository.prefs.set(key, value);
+      },
       subscribe(listener: RepositoryListener) {
         listeners.add(listener);
         return () => listeners.delete(listener);

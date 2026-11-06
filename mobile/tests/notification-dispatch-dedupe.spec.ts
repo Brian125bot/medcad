@@ -62,7 +62,7 @@ function fakeContext() {
       getDoseLogsInRange: async () => [],
       subscribe: () => () => {},
       logDose: vi.fn(),
-    },
+    } as never,
   }));
   return { prefs, execute };
 }

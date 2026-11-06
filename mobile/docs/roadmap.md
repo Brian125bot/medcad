@@ -44,7 +44,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
 | COR-76 | Native background alarm and notification engine | 5 | In review | Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Not device-tested; Android exact-alarm access comes from the local `modules/exact-alarm` module, which is unbuilt until the first development build |
-| COR-77 | Interactive lock-screen notification actions | 5 | In review | Take / Snooze 15m / Skip on `cx.dose.` and `cx.snooze.`; badge sync; device checklist in [notifications.md](notifications.md) (follow COR-97) |
+| COR-77 | Interactive lock-screen notification actions | 5 | In review | Take / Snooze 15m / Skip; dedupe, pending-only actions, iOS unlock, dismiss, stale snooze cleanup, custom entry; device checklist in [notifications.md](notifications.md) |
 
 ### M4 — Cabinet, refills and calendar sync
 

@@ -280,7 +280,7 @@ describe('ReminderEngine.reconcile', () => {
       exact: true,
       doseKeys: ['2026-10-16_med-a_slot-am', '2026-10-16_med-b_slot-am'],
     });
-    repository.medications = [makeMed(), makeMed({ id: 'med-b', timeSlots: [{ id: 'slot-am', time: '08:00', remindersEnabled: true }] })];
+    repository.medications = [makeMed(), makeMed({ id: 'med-b' })];
     repository.logs = [
       { key: '2026-10-16_med-a_slot-am', dateKey: '2026-10-16', medicationId: 'med-a', slotId: 'slot-am', status: 'taken', loggedAt: '08:05' },
     ];

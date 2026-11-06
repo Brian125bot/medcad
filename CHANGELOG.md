@@ -32,6 +32,14 @@ the issue id and PR number where there are any.
   `cx.snooze.` follow-ups outside the dose budget, syncs the app badge to
   pending doses for today, and keeps the COR-76 reconciler / port boundaries.
   Physical-device checklist is in `mobile/docs/notifications.md`.
+
+### Fixed
+- **[mobile]** COR-77 remediation (not device-tested): dedupe action responses
+  across the Android background task, JS listener, and cold start; require iOS
+  unlock for actions while keeping the vault key `WHEN_UNLOCKED`; dismiss
+  presented notifications after success; apply actions to pending doses only and
+  cancel stale `cx.snooze.` entries (including on vault wipe); register the
+  background task from a custom app entry before Expo Router loads.
 - **[mobile]** COR-76 local dose reminders (expo-notifications 57, not
   device-tested): post-commit `MedicationRepository.subscribe()` change events
   drive a single-flight `ReminderEngine` that reconciles a 14-day, 48-entry
