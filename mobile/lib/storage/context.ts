@@ -1,4 +1,4 @@
-import type { CipherPort, SecureKeyStore, SqlDriver } from './ports';
+import type { CipherPort, SecureKeyStore, SqlDriver, SqlOperations } from './ports';
 import type { MedicationRow, TimeSlotRow, DoseLogRow, UserPreferenceRow, SchemaVersionRecord } from './schema';
 import { CURRENT_DATABASE_SCHEMA_VERSION, DATABASE_NAME, DDL_STATEMENTS } from './schema';
 import type { DoseSlotSnapshot, TimeSlot } from '../domain/medication-data';
@@ -123,12 +123,12 @@ export const VAULT_CANARY_TABLE = '__vault_canary__';
 export const VAULT_CANARY_ROW_ID = 'canary';
 export const VAULT_AUTH_TAG = 'cadencerx-vault-auth-v1';
 
-async function readTableCount(driver: SqlDriver, table: string): Promise<number> {
+async function readTableCount(driver: SqlOperations, table: string): Promise<number> {
   const row = await driver.get<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table}`);
   return row?.count ?? 0;
 }
 
-async function vaultHasEncryptedRows(driver: SqlDriver): Promise<boolean> {
+async function vaultHasEncryptedRows(driver: SqlOperations): Promise<boolean> {
   for (const table of ['medications', 'time_slots', 'dose_logs', 'user_preferences']) {
     if ((await readTableCount(driver, table)) > 0) return true;
   }
@@ -411,8 +411,8 @@ export class MedicationRepository {
   private async writeKeyAndCanary(key: Uint8Array): Promise<void> {
     const envelope: VaultKeyEnvelope = { v: 1, k: toBase64(key) };
     const canary = await this.platform.cipher.seal(encodeUtf8(VAULT_AUTH_TAG), key);
-    await this.platform.driver.transaction(async () => {
-      await this.platform.driver.run(
+    await this.platform.driver.transaction(async (driver) => {
+      await driver.run(
         `INSERT INTO ${VAULT_CANARY_TABLE} (id, sealed, updated_at) VALUES (?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET sealed=excluded.sealed, updated_at=excluded.updated_at`,
         [VAULT_CANARY_ROW_ID, canary, nowIso()],
@@ -475,8 +475,8 @@ export class MedicationRepository {
         // Genuine first launch: no key and no rows — safe to provision.
         key = await this.platform.cipher.generateKey();
         const canary = await this.platform.cipher.seal(encodeUtf8(VAULT_AUTH_TAG), key);
-        await this.platform.driver.transaction(async () => {
-          await this.platform.driver.run(
+        await this.platform.driver.transaction(async (driver) => {
+          await driver.run(
             `INSERT INTO ${VAULT_CANARY_TABLE} (id, sealed, updated_at) VALUES (?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET sealed=excluded.sealed, updated_at=excluded.updated_at`,
             [VAULT_CANARY_ROW_ID, canary, nowIso()],
@@ -517,13 +517,14 @@ export class MedicationRepository {
   }
 
   private async putMedicationAndSlots(
+    key: Uint8Array,
     medicationRow: MedicationRow,
     timeSlotRows: TimeSlotRow[],
     staleSlotIds?: string[],
+    driver: SqlOperations = this.platform.driver,
   ): Promise<void> {
-    const key = await this.getKey();
-    await this.platform.driver.transaction(() =>
-      this.writeMedicationAndSlots(key, medicationRow, timeSlotRows, staleSlotIds),
+    await driver.transaction((transaction) =>
+      this.writeMedicationAndSlots(key, medicationRow, timeSlotRows, staleSlotIds, transaction),
     );
   }
 
@@ -533,6 +534,7 @@ export class MedicationRepository {
     medicationRow: MedicationRow,
     timeSlotRows: TimeSlotRow[],
     staleSlotIds?: string[],
+    driver: SqlOperations = this.platform.driver,
   ): Promise<void> {
     {
       const encryptedMedication = await encryptMedicationRow(
@@ -540,7 +542,7 @@ export class MedicationRepository {
         key,
         medicationRow as MedicationRow & Partial<Record<string, string | number | null>>,
       );
-      await this.platform.driver.run(
+      await driver.run(
         `INSERT INTO medications (
           id, frequency, start_date, end_date, days_of_week, interval_days, active,
           inventory_current, inventory_capacity, inventory_low_threshold,
@@ -585,7 +587,7 @@ export class MedicationRepository {
 
       for (const slot of timeSlotRows) {
         const encrypted = await encryptTimeSlotRow(this.platform.cipher, key, slot as TimeSlotRow & { label?: string });
-        await this.platform.driver.run(
+        await driver.run(
           `INSERT INTO time_slots (
             id, medication_id, time, dose_units, reminder_enabled, lead_minutes, created_at, updated_at, enc_payload
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -616,8 +618,8 @@ export class MedicationRepository {
         // slotSnapshot); only logs dated after today are dropped, as nothing can still happen there.
         const todayKey = toDateKey(new Date());
         for (const id of staleSlotIds) {
-          await this.platform.driver.run('DELETE FROM time_slots WHERE id = ?', [id]);
-          await this.platform.driver.run(
+          await driver.run('DELETE FROM time_slots WHERE id = ?', [id]);
+          await driver.run(
             'DELETE FROM dose_logs WHERE medication_id = ? AND slot_id = ? AND date_key > ?',
             [medicationRow.id, id, todayKey],
           );
@@ -626,15 +628,18 @@ export class MedicationRepository {
     }
   }
 
-  private async getMedicationRow(id: string): Promise<MedicationRow | null> {
+  private async getMedicationRow(id: string, driver: SqlOperations = this.platform.driver): Promise<MedicationRow | null> {
     await this.ensureReady();
-    return this.platform.driver.get<MedicationRow>('SELECT * FROM medications WHERE id = ?', [id]);
+    return driver.get<MedicationRow>('SELECT * FROM medications WHERE id = ?', [id]);
   }
 
-  private async getTimeSlotRows(medicationId: string): Promise<(TimeSlotRow & { label: string })[]> {
+  private async getTimeSlotRows(
+    medicationId: string,
+    driver: SqlOperations = this.platform.driver,
+  ): Promise<(TimeSlotRow & { label: string })[]> {
     await this.ensureReady();
     const key = await this.getKey();
-    const rows = await this.platform.driver.all<TimeSlotRow>(
+    const rows = await driver.all<TimeSlotRow>(
       'SELECT * FROM time_slots WHERE medication_id = ? ORDER BY time ASC',
       [medicationId],
     );
@@ -661,13 +666,13 @@ export class MedicationRepository {
     return medications;
   }
 
-  public async getMedicationById(id: string) {
+  public async getMedicationById(id: string, driver: SqlOperations = this.platform.driver) {
     await this.ensureReady();
-    const row = await this.getMedicationRow(id);
+    const row = await this.getMedicationRow(id, driver);
     if (!row) return null;
     const key = await this.getKey();
     const decrypted = await decryptMedicationRow(this.platform.cipher, key, row);
-    const slots = await this.getTimeSlotRows(id);
+    const slots = await this.getTimeSlotRows(id, driver);
     return (await import('./mappers')).rowsToDomainMedication(decrypted as never, slots as never);
   }
 
@@ -683,26 +688,29 @@ export class MedicationRepository {
     options: { inventoryBaseline?: number } = {},
   ) {
     await this.ensureReady();
+    const key = await this.getKey();
     const { domainMedicationToRows } = await import('./mappers');
     const { medicationRow, timeSlotRows } = domainMedicationToRows(med);
-    const write = async () => {
+    const write = async (driver: SqlOperations = this.platform.driver) => {
       const baseline = options.inventoryBaseline;
       if (baseline !== undefined) {
-        const latest = await this.getMedicationRow(med.id);
+        const latest = await this.getMedicationRow(med.id, driver);
         if (latest) {
           const userDelta = med.inventory.currentUnits - baseline;
           medicationRow.inventory_current = Math.max(0, latest.inventory_current + userDelta);
           med = { ...med, inventory: { ...med.inventory, currentUnits: medicationRow.inventory_current } };
         }
       }
-      const existingSlots = await this.getTimeSlotRows(med.id);
+      const existingSlots = await this.getTimeSlotRows(med.id, driver);
       const nextIds = new Set(timeSlotRows.map((slot) => slot.id));
       const staleSlotIds = existingSlots.filter((slot) => !nextIds.has(slot.id)).map((slot) => slot.id);
       const startedAt = performance.now();
       await this.putMedicationAndSlots(
+        key,
         medicationRow as MedicationRow,
         timeSlotRows as TimeSlotRow[],
         staleSlotIds,
+        driver,
       );
       this.lastWriteLatencyMs = Math.round((performance.now() - startedAt) * 100) / 100;
     };
@@ -719,10 +727,10 @@ export class MedicationRepository {
    */
   public async deleteMedication(id: string): Promise<void> {
     await this.ensureReady();
-    await this.platform.driver.transaction(async () => {
-      await this.platform.driver.run('DELETE FROM dose_logs WHERE medication_id = ? AND date_key > ?', [id, toDateKey(new Date())]);
-      await this.platform.driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
-      await this.platform.driver.run('DELETE FROM medications WHERE id = ?', [id]);
+    await this.platform.driver.transaction(async (driver) => {
+      await driver.run('DELETE FROM dose_logs WHERE medication_id = ? AND date_key > ?', [id, toDateKey(new Date())]);
+      await driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
+      await driver.run('DELETE FROM medications WHERE id = ?', [id]);
     });
     this.emitChange({ type: 'medication-deleted', medicationId: id });
   }
@@ -801,12 +809,12 @@ export class MedicationRepository {
     for (const med of medications) {
       for (const slot of med.timeSlots) slotsByKey.set(`${med.id}:${slot.id}`, slot);
     }
-    await this.platform.driver.runExclusive(async () => {
-      const key = await this.getKey();
-      await this.platform.driver.transaction(async () => {
+    const key = await this.getKey();
+    await this.platform.driver.runExclusive(async (driver) => {
+      await driver.transaction(async (transaction) => {
         for (const med of medications) {
           const { medicationRow, timeSlotRows } = domainMedicationToRows(med);
-          await this.writeMedicationAndSlots(key, medicationRow as MedicationRow, timeSlotRows as TimeSlotRow[]);
+          await this.writeMedicationAndSlots(key, medicationRow as MedicationRow, timeSlotRows as TimeSlotRow[], undefined, transaction);
         }
         const stamp = nowIso();
         for (const log of logs) {
@@ -826,7 +834,7 @@ export class MedicationRepository {
             unitsTaken: log.status === 'taken' ? (slotSnapshot?.doseUnits ?? 1) : null,
             slotSnapshot,
           });
-          await this.platform.driver.run(
+          await transaction.run(
             `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET status=excluded.status, logged_at=excluded.logged_at, updated_at=excluded.updated_at, enc_payload=excluded.enc_payload`,
@@ -873,13 +881,13 @@ export class MedicationRepository {
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
     const willBeTaken = status === 'taken';
     const stamp = loggedAt ?? hhMm();
+    await this.ensureReady();
+    const key = await this.getKey();
 
     // Single-writer gate: read-modify-write must not interleave (double-tap safety).
-    const result = await this.platform.driver.runExclusive(async () => {
-      await this.ensureReady();
-      const key = await this.getKey();
-      const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
-      const medication = await this.getMedicationById(medicationId);
+    const result = await this.platform.driver.runExclusive(async (driver) => {
+      const existing = await driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
+      const medication = await this.getMedicationById(medicationId, driver);
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
       const doseUnits = slot?.doseUnits ?? 1;
       const wasTaken = existing?.status === 'taken';
@@ -892,7 +900,7 @@ export class MedicationRepository {
       const unitsTaken = willBeTaken ? (wasTaken ? refund : doseUnits) : null;
 
       let updatedMedication = medication ?? undefined;
-      await this.platform.driver.transaction(async () => {
+      await driver.transaction(async (transaction) => {
         const logRow: DoseLogRow & DoseLogPhi = {
           id: doseKey,
           date_key: dateKey,
@@ -908,7 +916,7 @@ export class MedicationRepository {
           slotSnapshot,
         };
         const encrypted = await encryptDoseLogRow(this.platform.cipher, key, logRow);
-        await this.platform.driver.run(
+        await transaction.run(
           `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET status=excluded.status, logged_at=excluded.logged_at, updated_at=excluded.updated_at, enc_payload=excluded.enc_payload`,
@@ -927,9 +935,9 @@ export class MedicationRepository {
 
         if (medication && wasTaken !== willBeTaken) {
           const delta = willBeTaken ? -doseUnits : refund;
-          const current = await this.getMedicationRow(medicationId);
+          const current = await this.getMedicationRow(medicationId, transaction);
           if (current) {
-            await this.platform.driver.run(
+            await transaction.run(
               'UPDATE medications SET inventory_current = ?, updated_at = ? WHERE id = ?',
               [Math.max(0, current.inventory_current + delta), nowIso(), medicationId],
             );
@@ -938,7 +946,7 @@ export class MedicationRepository {
       });
 
       if (medication && wasTaken !== willBeTaken) {
-        updatedMedication = (await this.getMedicationById(medicationId)) ?? undefined;
+        updatedMedication = (await this.getMedicationById(medicationId, driver)) ?? undefined;
       }
 
       const log: import('../domain/medication-data').DoseLogItem = {
@@ -962,21 +970,22 @@ export class MedicationRepository {
     const { buildDoseKey } = await import('../domain/medication-data');
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
 
-    const result = await this.platform.driver.runExclusive(async () => {
-      await this.ensureReady();
-      const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
-      const medication = await this.getMedicationById(medicationId);
+    await this.ensureReady();
+    const key = await this.getKey();
+    const result = await this.platform.driver.runExclusive(async (driver) => {
+      const existing = await driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
+      const medication = await this.getMedicationById(medicationId, driver);
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
       const stored =
-        existing?.status === 'taken' ? await decryptDoseLogRow(this.platform.cipher, await this.getKey(), existing) : null;
+        existing?.status === 'taken' ? await decryptDoseLogRow(this.platform.cipher, key, existing) : null;
       const doseUnits = refundUnits(stored?.unitsTaken, slot?.doseUnits, stored?.slotSnapshot?.doseUnits);
 
-      await this.platform.driver.transaction(async () => {
-        await this.platform.driver.run('DELETE FROM dose_logs WHERE id = ?', [doseKey]);
+      await driver.transaction(async (transaction) => {
+        await transaction.run('DELETE FROM dose_logs WHERE id = ?', [doseKey]);
         if (existing?.status === 'taken' && medication) {
-          const current = await this.getMedicationRow(medicationId);
+          const current = await this.getMedicationRow(medicationId, transaction);
           if (current) {
-            await this.platform.driver.run(
+            await transaction.run(
               'UPDATE medications SET inventory_current = ?, updated_at = ? WHERE id = ?',
               [current.inventory_current + doseUnits, nowIso(), medicationId],
             );
@@ -985,7 +994,7 @@ export class MedicationRepository {
       });
 
       const updatedMedication =
-        existing?.status === 'taken' ? ((await this.getMedicationById(medicationId)) ?? undefined) : medication ?? undefined;
+        existing?.status === 'taken' ? ((await this.getMedicationById(medicationId, driver)) ?? undefined) : medication ?? undefined;
       return { undoneKey: doseKey, updatedMedication };
     });
     this.emitChange({ type: 'dose-changed', dateKey, medicationId, slotId });
@@ -1013,11 +1022,11 @@ export class MedicationRepository {
   ) {
     const { buildDoseKey } = await import('../domain/medication-data');
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
-    const result = await this.platform.driver.runExclusive(async () => {
-      await this.ensureReady();
-      const key = await this.getKey();
-      const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
-      const medication = await this.getMedicationById(medicationId);
+    await this.ensureReady();
+    const key = await this.getKey();
+    const result = await this.platform.driver.runExclusive(async (driver) => {
+      const existing = await driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
+      const medication = await this.getMedicationById(medicationId, driver);
       const slot = medication?.timeSlots.find((item) => item.id === slotId);
       const existingSnapshot = existing ? (await decryptDoseLogRow(this.platform.cipher, key, existing)).slotSnapshot : null;
       const logRow: DoseLogRow & DoseLogPhi = {
@@ -1034,7 +1043,7 @@ export class MedicationRepository {
         slotSnapshot: slotSnapshotFor(slot, existingSnapshot),
       };
       const encrypted = await encryptDoseLogRow(this.platform.cipher, key, logRow);
-      await this.platform.driver.run(
+      await driver.run(
         `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET status=excluded.status, logged_at=excluded.logged_at, updated_at=excluded.updated_at, enc_payload=excluded.enc_payload`,
@@ -1089,10 +1098,10 @@ export class MedicationRepository {
     await this.ensureReady();
     const { toDateKey } = await import('../domain/medication-data');
     const todayKey = toDateKey(new Date());
-    await this.platform.driver.transaction(async () => {
-      await this.platform.driver.run('DELETE FROM dose_logs');
-      await this.platform.driver.run('DELETE FROM time_slots');
-      await this.platform.driver.run('DELETE FROM medications');
+    await this.platform.driver.transaction(async (driver) => {
+      await driver.run('DELETE FROM dose_logs');
+      await driver.run('DELETE FROM time_slots');
+      await driver.run('DELETE FROM medications');
     });
     await seedDemoVault(this, todayKey);
     return {
@@ -1166,7 +1175,7 @@ export class MedicationRepository {
     const readLatencyMs = Math.round((performance.now() - readStart) * 100) / 100;
 
     const batchStart = performance.now();
-    await this.platform.driver.transaction(async () => {
+    await this.platform.driver.transaction(async (driver) => {
       for (let index = 0; index < 5; index += 1) {
         const batchRow = await encryptDoseLogRow(this.platform.cipher, key, {
           ...row,
@@ -1175,7 +1184,7 @@ export class MedicationRepository {
           slot_id: `slot-${index}`,
           logged_at: '10:00',
         });
-        await this.platform.driver.run(
+        await driver.run(
           `INSERT INTO dose_logs (id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at, enc_payload)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -1223,23 +1232,23 @@ async function migrateStorage(platform: StoragePlatform): Promise<void> {
     }
     return;
   }
-  await platform.driver.transaction(async () => {
+  await platform.driver.transaction(async (driver) => {
     for (const statement of DDL_STATEMENTS) {
-      await platform.driver.exec(statement);
+      await driver.exec(statement);
     }
-    await platform.driver.run(
+    await driver.run(
       `CREATE TABLE IF NOT EXISTS ${VAULT_CANARY_TABLE} (
         id TEXT PRIMARY KEY,
         sealed TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );`,
     );
-    const existing = await platform.driver.get<SchemaVersionRecord>(
+    const existing = await driver.get<SchemaVersionRecord>(
       'SELECT * FROM schema_versions WHERE version = ?',
       [CURRENT_DATABASE_SCHEMA_VERSION],
     );
     if (!existing) {
-      await platform.driver.run(
+      await driver.run(
         'INSERT INTO schema_versions (version, applied_at, description) VALUES (?, ?, ?)',
         [CURRENT_DATABASE_SCHEMA_VERSION, nowIso(), 'Initial encrypted SQLite schema (COR-71)'],
       );
@@ -1287,12 +1296,12 @@ export async function createStorageContext(platform: StoragePlatform): Promise<S
     async deleteVault(): Promise<void> {
       await platform.keystore.deleteItem(VAULT_KEY_ID);
       repository.forgetCachedKeyForTests();
-      await platform.driver.transaction(async () => {
-        await platform.driver.run('DELETE FROM dose_logs');
-        await platform.driver.run('DELETE FROM time_slots');
-        await platform.driver.run('DELETE FROM medications');
-        await platform.driver.run('DELETE FROM user_preferences');
-        await platform.driver.run(`DELETE FROM ${VAULT_CANARY_TABLE} WHERE id = ?`, [VAULT_CANARY_ROW_ID]);
+      await platform.driver.transaction(async (driver) => {
+        await driver.run('DELETE FROM dose_logs');
+        await driver.run('DELETE FROM time_slots');
+        await driver.run('DELETE FROM medications');
+        await driver.run('DELETE FROM user_preferences');
+        await driver.run(`DELETE FROM ${VAULT_CANARY_TABLE} WHERE id = ?`, [VAULT_CANARY_ROW_ID]);
       });
       repository.emitChange({ type: 'vault-deleted' });
     },

@@ -31,8 +31,8 @@ await assert.rejects(async () => cipher.open(tampered, key), VaultIntegrityError
 
 const driver = nodeSqlDriver();
 await driver.open(':memory:');
-await driver.transaction(async () => {
-  await driver.exec(DDL_STATEMENTS.join('\n'));
+await driver.transaction(async (transaction) => {
+  await transaction.exec(DDL_STATEMENTS.join('\n'));
 });
 const tables = await driver.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
 assert.deepStrictEqual(

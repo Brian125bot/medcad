@@ -1,6 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { CipherPort, SecureKeyStore, SqlDriver, SqlValue } from '../lib/storage/ports';
+import type { CipherPort, SecureKeyStore, SqlDriver, SqlOperations, SqlValue } from '../lib/storage/ports';
 
 export class VaultIntegrityError extends Error {
   constructor(message = 'Encrypted payload is corrupted, tampered with, or invalid') {
@@ -50,46 +50,62 @@ export function memoryKeystore(): SecureKeyStore {
 
 export function nodeSqlDriver(name = ':memory:'): SqlDriver {
   const db = new DatabaseSync(name);
-  const run = (sql: string, params: readonly SqlValue[] = []) => {
-    db.prepare(sql).run(...(params as any[]));
-  };
+  let gate: Promise<unknown> = Promise.resolve();
+  async function withGate<T>(work: () => Promise<T>): Promise<T> {
+    const pending = gate.then(work, work);
+    gate = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
+  function scopedOperations(lockHeld: boolean, transactionActive: boolean): SqlOperations {
+    const runQuery = <T>(query: () => T): Promise<T> => {
+      const work = async () => query();
+      return lockHeld ? work() : withGate(work);
+    };
+    const operations: SqlOperations = {
+      async exec(sql) {
+        await runQuery(() => db.exec(sql));
+      },
+      async run(sql, params = []) {
+        await runQuery(() => db.prepare(sql).run(...(params as any[])));
+      },
+      all<T>(sql: string, params: readonly SqlValue[] = []) {
+        return runQuery(() => db.prepare(sql).all(...(params as any[])) as T[]);
+      },
+      get<T>(sql: string, params: readonly SqlValue[] = []) {
+        return runQuery(() => {
+          const row = db.prepare(sql).get(...(params as any[]));
+          return (row as T | undefined) ?? null;
+        });
+      },
+      async transaction<T>(fn: (driver: SqlOperations) => Promise<T>) {
+        if (transactionActive) return fn(operations);
+        const work = async () => {
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const result = await fn(scopedOperations(true, true));
+            db.exec('COMMIT');
+            return result;
+          } catch (error) {
+            try { db.exec('ROLLBACK'); } catch {}
+            throw error;
+          }
+        };
+        return lockHeld ? work() : withGate(work);
+      },
+      runExclusive<T>(fn: (driver: SqlOperations) => Promise<T>) {
+        if (lockHeld) return fn(operations);
+        return withGate(() => fn(scopedOperations(true, false)));
+      },
+    };
+    return operations;
+  }
   return {
-    async open() { db.exec('PRAGMA foreign_keys = ON'); },
-    async exec(sql) { db.exec(sql); },
-    async run(sql, params = []) { run(sql, params); },
-    async all<T>(sql: string, params: readonly SqlValue[] = []) {
-      return db.prepare(sql).all(...(params as any[])) as T[];
+    ...scopedOperations(false, false),
+    async open() {
+      await withGate(async () => db.exec('PRAGMA foreign_keys = ON'));
     },
-    async get<T>(sql: string, params: readonly SqlValue[] = []) {
-      const row = db.prepare(sql).get(...(params as any[]));
-      return (row as T | undefined) ?? null;
-    },
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const result = await fn();
-        db.exec('COMMIT');
-        return result;
-      } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
-        throw error;
-      }
-    },
-    async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-      // node:sqlite is synchronous under the hood; still serialize through a
-      // mutex so tests exercise the same single-writer discipline as the app.
-      return runExclusiveGate(fn);
-    },
-    async close(): Promise<void> {
-      db.close();
+    async close() {
+      await withGate(async () => db.close());
     },
   };
-}
-
-let fixtureGate: Promise<unknown> = Promise.resolve();
-
-async function runExclusiveGate<T>(fn: () => Promise<T>): Promise<T> {
-  const run = fixtureGate.then(fn, fn);
-  fixtureGate = run.catch(() => undefined);
-  return run as Promise<T>;
 }

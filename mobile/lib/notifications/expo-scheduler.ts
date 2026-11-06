@@ -156,13 +156,13 @@ export function createExpoPermissions(): NotificationPermissionPort {
   };
 }
 
-/** Foreground presentation: show the banner and list entry, play the sound. */
+/** Foreground presentation: show the banner and list entry, preserving silent reminders. */
 export function configureForegroundPresentation(): void {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
+    handleNotification: async (notification) => ({
       shouldShowBanner: true,
       shouldShowList: true,
-      shouldPlaySound: true,
+      shouldPlaySound: notification.request.content.sound !== null && notification.request.content.sound !== undefined,
       shouldSetBadge: false,
     }),
   });

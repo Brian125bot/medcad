@@ -216,7 +216,14 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
   }, 30_000);
 
   it('fails integrity when the driver does not roll back', async () => {
-    const wrapDriver = (driver: SqlDriver): SqlDriver => ({ ...driver, transaction: (fn) => fn() });
+    const wrapDriver = (driver: SqlDriver): SqlDriver => ({
+      ...driver,
+      transaction: (fn) => fn(driver),
+      runExclusive: (fn) =>
+        driver.runExclusive((scoped) =>
+          fn({ ...scoped, transaction: (transaction) => transaction(scoped) }),
+        ),
+    });
     const report = await runDeviceBenchmark(nodeEnv({ wrapDriver }), telemetry, { todayKey: TODAY, warmRuns: 0 });
     expect(report.integrity.atomicRollback.passed).toBe(false);
     expect(report.integrity.atomicRollback.rowsAfter).toBeGreaterThan(report.integrity.atomicRollback.rowsBefore);
