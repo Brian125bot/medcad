@@ -25,6 +25,18 @@ the issue id and PR number where there are any.
 
 ## [Unreleased]
 
+### Added
+- **CI (COR-87):** GitHub Actions workflow `.github/workflows/ci.yml` for `mobile/`.
+  Runs on pull requests and pushes to `main`, on `ubuntu-24.04`, Node 22 from
+  `mobile/.nvmrc` (npm cache, read-only permissions, superseded runs cancelled,
+  no secrets): `npm ci`, `tsc --noEmit`, `typecheck:storage`, lint, `npm test`
+  (100 % coverage gate), `test:tz`, `expo export --platform all`. Actions are
+  pinned to commit SHAs. The root web prototype is not included (its `check` /
+  `lint` / `test` scripts fail today and it has no npm lockfile). This does not
+  replace device QA and it does not produce storage benchmark numbers.
+- **[mobile]** `"engines": { "node": ">=22.13" }` and `mobile/.nvmrc` (`22`).
+  The storage tests need `node:sqlite`, which ships unflagged from Node 22.13.
+
 ### Fixed
 - **[mobile]** Permission revoke cancels scheduled `cx.dose.*` reminders (COR-98).
   After grant → schedule → revoke, `ReminderEngine` no longer returns while OS
@@ -134,8 +146,9 @@ the issue id and PR number where there are any.
   `7d72238` (PRs #19–#24) and Linear on 2026-11-06, records COR-76 and COR-77 as
   Done in code, COR-88 In Progress again (harness only; no device numbers),
   COR-97 In Progress (reminder device QA), and COR-98 / COR-99 filed. The
-  CadenceRx Mobile v1.0 project is In Progress. There is still no CI: PR #17
-  was closed unmerged (nearest issue COR-87). Encryption stays field-level
+  CadenceRx Mobile v1.0 project is In Progress. CI is the mobile-only GitHub
+  Actions workflow in this unreleased section (COR-87), successor to closed
+  PR #17. Encryption stays field-level
   AES-256-GCM with the key in `expo-secure-store`; the database file is not
   SQLCipher and the app does not use `PRAGMA key`.
 

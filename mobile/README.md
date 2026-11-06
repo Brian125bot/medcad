@@ -12,8 +12,9 @@ wizard (COR-75), Today (COR-74), local dose reminders (COR-76) and lock-screen
 actions (COR-77). See [`docs/notifications.md`](docs/notifications.md). Insights
 and Cabinet are not built yet. The app bundles again after COR-90 restored
 `assets/fonts/SpaceMono-Regular.ttf`; tests, typecheck and lint work. Nothing
-has been run on a device yet (COR-88, COR-91, COR-97). There is no CI on `main`
-(PR #17 was closed unmerged; nearest issue COR-87).
+has been run on a device yet (COR-88, COR-91, COR-97). CI (COR-87,
+`.github/workflows/ci.yml`) runs the mobile gate on `ubuntu-24.04` and Node 22;
+the web prototype is not included, and CI does not record device numbers.
 
 **Documentation lives in [`docs/`](docs/README.md)** — start with
 [`docs/architecture.md`](docs/architecture.md), and see

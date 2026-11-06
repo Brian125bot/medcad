@@ -14,7 +14,10 @@ should be updated.
 > is **In Progress**. M1 and M2 are code-complete apart from that device
 > verification; M3 is code-complete for COR-76 and COR-77, with device QA in
 > progress and two residuals filed (COR-98, COR-99). M4–M6 have not started.
-> There is no CI on `main` (PR #17 was closed unmerged; nearest issue COR-87).
+> CI (COR-87) is the mobile-only GitHub Actions workflow
+> (`.github/workflows/ci.yml`, `ubuntu-24.04`, Node 22, `engines` `>=22.13`).
+> It does not record device numbers. PR #17 was closed unmerged; this workflow
+> is its successor.
 
 ## Milestones and issues
 
@@ -149,7 +152,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 8 | ~~No notification hook~~ **Handled** | Every repository mutation (including `deleteMedication`, dose logs and preferences) emits a post-commit change event; the reminder engine reschedules from it | [notifications.md](notifications.md) | COR-76 |
 | 9 | Migration runner is a single step | There is no per-version logic, and the audit-row text is hard-coded to v1. Adding a v2 needs the ordered-step structure first (not needed for payload-only fields) | [storage.md](storage.md#schema-versions-and-migrations) | Untracked (becomes necessary with the first column change) |
 | 10 | No delete / pause UI | `deleteMedication` and `toggleActiveMedication` exist but no screen calls them | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |
-| 11 | No CI | `.github/` does not exist on `main`. PR #17 (`ci-github-actions`, `bbdacf3`) was closed unmerged on 2026-11-06. The local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
+| 11 | ~~No CI~~ **Fixed** | GitHub Actions runs the mobile gate on every PR and push to `main` (`ubuntu-24.04`, Node 22, `engines` `>=22.13`). Successor to closed PR #17. The web prototype is not in CI. Branch protection (required checks) is still a repo setting. CI does not record device benchmark numbers | [development.md](development.md#before-you-call-a-change-done) | COR-87 |
 | 12 | `mobile/` isn't self-contained | Two parity specs import the web module at the repo root, so they fail if `mobile/` is checked out alone | [architecture.md](architecture.md#8-relationship-to-the-web-prototype) | Untracked |
 | 13 | Legacy duplication in the domain module | Web-parity copies of schedule helpers (and duplicate `buildDoseKey` / `toDateKey`) sit beside the hardened `lib/schedule` versions | [architecture.md](architecture.md#7-legacy-duplication) | Untracked |
 | 14 | Scaffold leftovers | `app/modal.tsx`, `EditScreenInfo`, the Themed components and the dev-only Theme tab (`app/(tabs)/two.tsx`) are template code. The scaffold tabs were replaced in COR-73 | [architecture.md](architecture.md#2-module-map) | Untracked |

@@ -39,8 +39,12 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test
 - **Heads-up:** nothing has been run on a real device yet (COR-88 storage
   numbers, COR-91 wizard, COR-97 reminders). Bundling was restored in COR-90
   (`SpaceMono-Regular.ttf` in `mobile/assets/fonts/`).
-- **There is no CI on `main`.** PR #17 was closed unmerged. The command above
-  is the only gate (nearest Linear issue: COR-87).
+- **CI (COR-87):** GitHub Actions (`.github/workflows/ci.yml`) runs that mobile
+  gate on every pull request and push to `main`: `npm ci`, `tsc --noEmit`,
+  `typecheck:storage`, lint, `npm test` (100 % coverage gate), `test:tz` and
+  `expo export --platform all`, on `ubuntu-24.04` and Node 22 (`mobile/.nvmrc`;
+  `engines` requires `>=22.13`). The web prototype is not checked in CI. Actions
+  previously failed to start when the GitHub account billing lock was on.
 
 ## Web prototype
 
