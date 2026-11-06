@@ -16,6 +16,8 @@ export const MAX_PENDING_NOTIFICATIONS = 48;
 export const RESERVED_NOTIFICATIONS = 16;
 /** The sentinel fires this long after the last scheduled group. */
 export const SENTINEL_DELAY_MINUTES = 5;
+/** Untruncated plans end with a sentinel at 09:00 local on the last full day of the window. */
+export const SENTINEL_WINDOW_END_MINUTE = 9 * 60;
 
 /** A civil (wall-clock) instant: calendar day plus minute of that day. */
 export interface CivilInstant {

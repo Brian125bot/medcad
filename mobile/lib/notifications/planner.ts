@@ -25,6 +25,7 @@ import {
   PLANNING_HORIZON_DAYS,
   SENTINEL_DELAY_MINUTES,
   SENTINEL_ID,
+  SENTINEL_WINDOW_END_MINUTE,
   type AlertProfile,
   type CivilInstant,
   type CivilNow,
@@ -108,16 +109,30 @@ export function planNotifications(input: PlanInput): NotificationPlan {
   const ordered = [...groups.values()].sort((a, b) => compareCivil(a.fireAt, b.fireAt));
   for (const group of ordered) group.doses.sort(compareDoses);
 
-  if (ordered.length <= budget) return { notifications: ordered, truncated: false };
+  // Any reminder-enabled slot gets a sentinel, even if nothing falls inside the
+  // window, so reminders never stop silently when the app isn't opened.
+  const hasReminders = active.some((m) => m.timeSlots.some((slot) => slot.reminderEnabled !== false));
+  if (!hasReminders) return { notifications: [], truncated: false };
 
+  const truncated = ordered.length > budget - 1;
   const kept = ordered.slice(0, budget - 1);
-  const anchor = kept.length > 0 ? kept[kept.length - 1].fireAt : nowInstant;
+  let fireAt: CivilInstant;
+  if (truncated) {
+    const anchor = kept.length > 0 ? kept[kept.length - 1].fireAt : nowInstant;
+    fireAt = shiftCivil(anchor, SENTINEL_DELAY_MINUTES);
+  } else {
+    const windowEnd: CivilInstant = { dateKey: addDaysToKey(todayKey, horizonDays - 1), minuteOfDay: SENTINEL_WINDOW_END_MINUTE };
+    const earliest = shiftCivil(nowInstant, SENTINEL_DELAY_MINUTES);
+    fireAt = compareCivil(windowEnd, earliest) < 0 ? earliest : windowEnd;
+  }
   const sentinel: PlannedNotification = {
     id: SENTINEL_ID,
     kind: 'sentinel',
-    fireAt: shiftCivil(anchor, SENTINEL_DELAY_MINUTES),
+    fireAt,
     doses: [],
     profile: { ...DEFAULT_MEDICATION_ALERT },
   };
-  return { notifications: [...kept, sentinel], truncated: true };
+  // Stable sort keeps the sentinel after a dose group sharing its instant.
+  const notifications = [...kept, sentinel].sort((a, b) => compareCivil(a.fireAt, b.fireAt));
+  return { notifications, truncated };
 }

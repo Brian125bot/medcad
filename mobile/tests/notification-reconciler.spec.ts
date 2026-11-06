@@ -127,10 +127,11 @@ describe('ReminderEngine.reconcile', () => {
   it('schedules the plan, reads only range-limited logs, and reports status', async () => {
     const { engine, scheduler, repository } = setup();
     await engine.reconcile();
-    expect(doseIds(scheduler)).toHaveLength(14);
+    // 14 daily doses plus the window-end sentinel.
+    expect(doseIds(scheduler)).toHaveLength(15);
     expect(scheduler.calls[0]).toBe('channels');
     expect(repository.ranges).toEqual([['2026-10-16', '2026-10-30']]);
-    expect(engine.getStatus()).toEqual({ state: 'ok', lastReconciledAt: '2026-10-16T12:00:00.000Z', scheduledCount: 14, truncated: false });
+    expect(engine.getStatus()).toEqual({ state: 'ok', lastReconciledAt: '2026-10-16T12:00:00.000Z', scheduledCount: 15, truncated: false });
     const first = scheduler.scheduled.get('cx.dose.2026-10-16.0800')!.request!;
     expect(first.fireAtMs).toBe(Date.UTC(2026, 9, 16, 8));
     expect(first.content.body).toBe('1 dose due at 480m');
@@ -279,7 +280,7 @@ describe('ReminderEngine lifecycle', () => {
     permissions.status = 'undetermined';
     await expect(engine.ensurePermission()).resolves.toBe('granted');
     expect(permissions.requests).toBe(1);
-    expect(doseIds(scheduler)).toHaveLength(14);
+    expect(doseIds(scheduler)).toHaveLength(15);
     permissions.status = 'denied';
     await expect(engine.ensurePermission()).resolves.toBe('denied');
     expect(permissions.requests).toBe(1);
