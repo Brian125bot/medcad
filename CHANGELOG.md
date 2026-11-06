@@ -57,6 +57,22 @@ the issue id and PR number where there are any.
   Copy Diagnostics button. The benchmark Markdown now follows the COR-88 report
   template (sign-off left pending review). *(COR-88)*
 
+### Fixed
+- **[mobile]** Dose history survives removing a dose time or deleting a
+  medication: every dose log stores a `slotSnapshot` (`time`, `label`,
+  `doseUnits`) in its encrypted payload, returned by all dose-log readers.
+  Adherence and streaks (`lib/schedule/analytics.ts` and the
+  `lib/domain/medication-data.ts` copy) count these orphan logs under the
+  snapshot label; a deleted medication's logs are left out of `byMedication`.
+  Today still lists current slots only, so no phantom doses. Logs dated after
+  today for the removed slot / medication are deleted; past ones never are.
+  Undo of an orphan without `unitsTaken` refunds the snapshot's dose. No schema
+  change; pre-COR-93 logs have no snapshot and are skipped once orphaned.
+  *(COR-93, PR #18)*
+- **[mobile]** A failed font load no longer crashes the app shell: the error is
+  logged, the splash screen still dismisses and text falls back to the system
+  monospace. *(COR-90 follow-up, PR #15)*
+
 ## [1.0.0-alpha.1] - 2026-10-16
 
 First tagged version: an alpha pre-release of the CadenceRx mobile app. Not
@@ -134,17 +150,6 @@ shipped and not verified on a device.
   done from the header's "+ Add" on every tab. *(COR-73 follow-up)*
 
 ### Fixed
-- **[mobile]** Dose history survives removing a dose time or deleting a
-  medication: every dose log stores a `slotSnapshot` (`time`, `label`,
-  `doseUnits`) in its encrypted payload, returned by all dose-log readers.
-  Adherence and streaks (`lib/schedule/analytics.ts` and the
-  `lib/domain/medication-data.ts` copy) count these orphan logs under the
-  snapshot label; a deleted medication's logs are left out of `byMedication`.
-  Today still lists current slots only, so no phantom doses. Logs dated after
-  today for the removed slot / medication are deleted; past ones never are.
-  Undo of an orphan without `unitsTaken` refunds the snapshot's dose. No schema
-  change; pre-COR-93 logs have no snapshot and are skipped once orphaned.
-  *(COR-93)*
 - **[mobile]** Editing a medication no longer overwrites stock changed by dose
   logging while the editor was open: the edit screen saves with
   `inventoryBaseline` and the repository applies only the user's stock change
