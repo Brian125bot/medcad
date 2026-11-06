@@ -97,6 +97,7 @@ describe('buildReminderContent', () => {
     const content = buildReminderContent(sentinel, SETTINGS);
     expect(content.title).toBe(SENTINEL_TITLE);
     expect(content.data).toEqual({ v: 1, kind: 'sentinel' });
+    expect(content.categoryIdentifier).toBeUndefined();
   });
 });
 
@@ -110,9 +111,12 @@ describe('hashReminderContent', () => {
     expect(hashReminderContent({ ...content, body: 'x' })).not.toBe(hash);
     expect(hashReminderContent({ ...content, channelId: 'reminders-silent-v1' })).not.toBe(hash);
     expect(hashReminderContent({ ...content, data: { v: 1, kind: 'sentinel' } })).not.toBe(hash);
+    expect(hashReminderContent({ ...content, categoryIdentifier: undefined })).not.toBe(hash);
   });
 
-  it('matches a pinned value so hashes survive app updates', () => {
-    expect(hashReminderContent({ title: 'a', body: 'b', data: { v: 1, kind: 'sentinel' }, channelId: 'c' })).toMatchInlineSnapshot(`"2775ee94"`);
+  it('matches a pinned value so unrelated hash changes are caught', () => {
+    // categoryIdentifier is part of the pin (null when absent) so dropping or
+    // adding the dose action category rewrites scheduled reminders once.
+    expect(hashReminderContent({ title: 'a', body: 'b', data: { v: 1, kind: 'sentinel' }, channelId: 'c' })).toMatchInlineSnapshot(`"efe56b85"`);
   });
 });

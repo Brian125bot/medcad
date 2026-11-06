@@ -4,9 +4,10 @@
 >
 > This page covers the **Next.js web** notification engine (`lib/notifications.ts`,
 > which the web code and tests also refer to as "COR-76"). The *mobile*
-> notification engine is Linear **COR-76** and is **not built yet**; see
-> [`mobile/docs/roadmap.md`](../mobile/docs/roadmap.md) for its status and
-> requirements.
+> notification engine is Linear **COR-76**, which is **Done in code** on `main`
+> (PR #20) and described in
+> [`mobile/docs/notifications.md`](../mobile/docs/notifications.md). Device QA
+> is COR-97. See [`mobile/docs/roadmap.md`](../mobile/docs/roadmap.md).
 
 ## Runtime Environment
 CadenceRx runs as a Next.js (App Router) web application. This document outlines the notification delivery model, security posture, and runtime capabilities.

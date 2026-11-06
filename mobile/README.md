@@ -5,13 +5,16 @@ project root and lives at `mobile/` in the `Brian125bot/medcad` monorepo
 (the repo root holds the Next.js web app; shared scheduling logic from the
 web app's `lib/medication-data.ts` is ported here in later issues).
 
-**Status (2026-10-16):** the data layer is built — encrypted local storage
-(COR-71) and the schedule / streak / supply engine (COR-72) — plus the
-add / edit medication wizard (COR-75), Today (COR-74) and local dose
-reminders (COR-76, [`docs/notifications.md`](docs/notifications.md)). Insights
+**Status (2026-11-06, `main` `7d72238`):** the data layer is built — field-level
+AES-256-GCM in `enc_payload` with the key in `expo-secure-store` (COR-71; not
+SQLCipher) — plus the schedule / streak / supply engine (COR-72), the add / edit
+wizard (COR-75), Today (COR-74), local dose reminders (COR-76) and lock-screen
+actions (COR-77). See [`docs/notifications.md`](docs/notifications.md). Insights
 and Cabinet are not built yet. The app bundles again after COR-90 restored
 `assets/fonts/SpaceMono-Regular.ttf`; tests, typecheck and lint work. Nothing
-has been run on a device yet (COR-91).
+has been run on a device yet (COR-88, COR-91, COR-97). CI (COR-87,
+`.github/workflows/ci.yml`) runs the mobile gate on `ubuntu-24.04` and Node 22;
+the web prototype is not included, and CI does not record device numbers.
 
 **Documentation lives in [`docs/`](docs/README.md)** — start with
 [`docs/architecture.md`](docs/architecture.md), and see
@@ -28,7 +31,7 @@ recorded in the repo-root [`CHANGELOG.md`](../CHANGELOG.md).
 | Styling    | NativeWind v4 (Tailwind CSS v3 utilities)           |
 | Icons      | Lucide React Native                                 |
 | Safe area  | `react-native-safe-area-context` + `expo-status-bar`|
-| Storage    | `expo-sqlite` + `expo-crypto` (AES-256-GCM) + `expo-secure-store`, behind ports in `lib/storage` |
+| Storage    | `expo-sqlite` + field-level AES-256-GCM (`expo-crypto`) + `expo-secure-store` (not SQLCipher / `PRAGMA key`), behind ports in `lib/storage` |
 | Pickers / graphics | `@react-native-community/datetimepicker`, `react-native-svg` |
 | Tests      | `tsx` + `node:assert` (storage), Vitest 3 with a 100 % coverage gate (schedule, wizard, today, storage benchmark and diagnostics) |
 
@@ -83,7 +86,7 @@ pre-commit gate, and troubleshooting.
 ```
 app/                 # Expo Router screens (every file is a route)
   _layout.tsx        # root stack: fonts, splash, SafeAreaProvider, global.css
-  (tabs)/            # bottom tabs: Home (scaffold), Medications, Theme (scaffold)
+  (tabs)/            # bottom tabs: Today, Regimen, Insights, Cabinet (Theme in dev)
   medication/        # new.tsx, [id].tsx — add / edit wizard, presented as modals
   modal.tsx          # template modal (unused placeholder)
   +not-found.tsx

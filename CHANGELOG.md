@@ -36,33 +36,37 @@ the issue id and PR number where there are any.
   replace device QA and it does not produce storage benchmark numbers.
 - **[mobile]** `"engines": { "node": ">=22.13" }` and `mobile/.nvmrc` (`22`).
   The storage tests need `node:sqlite`, which ships unflagged from Node 22.13.
-- **[mobile]** COR-77 interactive lock-screen dose actions (not
-  device-tested): `dose_reminder` category with Take, Snooze 15m, and Skip;
-  background handler writes via `MedicationRepository.logDose`, schedules
-  `cx.snooze.` follow-ups outside the dose budget, syncs the app badge to
-  pending doses for today, and keeps the COR-76 reconciler / port boundaries.
-  Physical-device checklist is in `mobile/docs/notifications.md`.
 
 ### Fixed
-- **[mobile]** COR-77 remediation (not device-tested): dedupe action responses
-  across the Android background task, JS listener, and cold start; require iOS
-  unlock for actions while keeping the vault key `WHEN_UNLOCKED`; dismiss
-  presented notifications after success; apply actions to pending doses only and
-  cancel stale `cx.snooze.` entries (including on vault wipe); register the
-  background task from a custom app entry before Expo Router loads.
+- **[mobile]** Permission revoke cancels scheduled `cx.dose.*` reminders (COR-98).
+  After grant → schedule → revoke, `ReminderEngine` no longer returns while OS
+  entries remain and the status says `scheduledCount: 0`. `cx.snooze.*` is left
+  in place. *(COR-98)*
+- **[mobile]** Sentinel and window-end reminders no longer default to the
+  `dose_reminder` category, so they do not show Take / Snooze / Skip (COR-99).
+  `hashReminderContent` includes `categoryIdentifier`, so reminders scheduled
+  before this pick up the category change on the next reconcile. *(COR-99)*
+
+### Added
 - **[mobile]** COR-76 local dose reminders (expo-notifications 57, not
-  device-tested): post-commit `MedicationRepository.subscribe()` change events
-  drive a single-flight `ReminderEngine` that reconciles a 14-day, 48-entry
-  `cx.dose.` plan on start, save and foreground. Generic lock-screen text by
-  default (names opt-in), grouped by fire instant, four fixed Android channels,
-  a generated 880 + 1320 Hz chime, encrypted per-medication sound / vibration,
-  and a Reminders settings screen from the Regimen bell. A window-end sentinel
-  is always scheduled while any reminder is on; each entry carries non-PHI
-  schedule metadata (fire time, content hash, exact flag) so cold starts do not
-  reschedule; a local Android `exact-alarm` module (unbuilt until the first
-  development build) reports *Alarms & reminders* access, re-arms inexact
+  device-tested; PR #20, `5953af3`): post-commit `MedicationRepository.subscribe()`
+  change events drive a single-flight `ReminderEngine` that reconciles a 14-day,
+  48-entry `cx.dose.` plan on start, save and foreground. Generic lock-screen
+  text by default (names opt-in), grouped by fire instant, four fixed Android
+  channels, a generated 880 + 1320 Hz chime, encrypted per-medication sound /
+  vibration, and a Reminders settings screen from the Regimen bell. A window-end
+  sentinel is always scheduled while any reminder is on; each entry carries
+  non-PHI schedule metadata (fire time, content hash, exact flag) so cold starts
+  do not reschedule; a local Android `exact-alarm` module (unbuilt until the
+  first development build) reports *Alarms & reminders* access, re-arms inexact
   alarms once access is granted, and backs a one-time wizard prompt. See
-  [`notifications.md`](mobile/docs/notifications.md). *(COR-76)*
+  [`notifications.md`](mobile/docs/notifications.md). *(COR-76, #20)*
+- **[mobile]** COR-77 interactive lock-screen dose actions (not
+  device-tested; PR #22, `828b295`): `dose_reminder` category with Take, Snooze
+  15m, and Skip; background handler writes via `MedicationRepository.logDose`,
+  schedules `cx.snooze.` follow-ups outside the dose budget, syncs the app badge
+  to pending doses for today, and keeps the COR-76 reconciler / port boundaries.
+  Physical-device checklist is in `mobile/docs/notifications.md`. *(COR-77, #22)*
 - **[mobile]** COR-88 device storage benchmark tooling (no device numbers yet):
   `lib/storage/device-benchmark.ts` times cold init, a 10-medication / 500-log
   single-transaction seed, a 365-day range query and a dose → taken update with
@@ -90,7 +94,8 @@ the issue id and PR number where there are any.
   *(COR-88)*
 
 ### Changed
-- **[mobile]** COR-88 benchmark report (schema `cadencerx.cor88.device-benchmark/v3`):
+- **[mobile]** COR-88 harness v2 (PR #21, `83dcdf1`; no device numbers): benchmark
+  report schema `cadencerx.cor88.device-benchmark/v3`.
   `repository.runBenchmark()` now runs 10× per run (40 samples) and the report
   gives cold, avg warm, p50, p95 and max for the single write, read and 5-row
   batch (v1 had read / batch p50 only and p95 over 4 samples); the `< 15 ms`
@@ -101,11 +106,22 @@ the issue id and PR number where there are any.
   diagnostics the device line and the full `getStorageEngineInfo()` JSON. *(COR-88)*
 
 ### Fixed
-- **[mobile]** Native storage transactions were not atomic: `withExclusiveTransactionAsync`
-  runs on its own connection, but `expoSqlDriver` sent statements to the main
-  handle, so each auto-committed and rollback did nothing. Statements inside
-  `transaction()` now go through the transaction connection (nested calls join it).
-  Found by the COR-88 emulator smoke test (`atomicRollback` 510 → 1020 rows). *(COR-71, COR-88, #21)*
+- **[mobile]** COR-77 remediation (not device-tested; PR #23, `7929a42`): dedupe
+  action responses across the Android background task, JS listener, and cold
+  start; require iOS unlock for actions while keeping the vault key
+  `WHEN_UNLOCKED`; dismiss presented notifications after success; apply actions
+  to pending doses only and cancel stale `cx.snooze.` entries (including on
+  vault wipe); register the background task from a custom app entry before Expo
+  Router loads. *(COR-77, #23)*
+- **[mobile]** Storage transactions stay on one connection (PR #21 atomicity,
+  PR #24 isolation, `7d72238`). `withExclusiveTransactionAsync` uses its own
+  connection; statements inside `transaction()` / `runExclusive()` now go through
+  the scoped driver passed into the callback, and nested calls join it. Unrelated
+  work on the root driver does not enter that scope. Found by the COR-88 emulator
+  smoke test (`atomicRollback` 510 → 1020 rows). *(COR-71, COR-88, #21, #24)*
+- **[mobile]** Foreground reminders keep a silent or vibrate-only profile silent
+  (PR #24): `shouldPlaySound` follows the notification `sound` instead of always
+  playing, while the banner and list entry still show. *(#24)*
 - **[mobile]** Android build: notification sound renamed `cadencerx_chime.wav`
   (Android resource names cannot contain `-`), and `ExactAlarmModule.kt` no longer
   uses bare `return@Function`, which Kotlin 2 rejects. *(COR-76, #21)*
@@ -123,6 +139,18 @@ the issue id and PR number where there are any.
 - **[mobile]** A failed font load no longer crashes the app shell: the error is
   logged, the splash screen still dismisses and text falls back to the system
   monospace. *(COR-90 follow-up, PR #15)*
+
+### Documentation
+- **Documentation** — PR #19 (`73345d7`) synced the roadmap, changelog and mobile
+  docs to `main` at `aa496fc` (2026-11-05). This entry's follow-up, against
+  `7d72238` (PRs #19–#24) and Linear on 2026-11-06, records COR-76 and COR-77 as
+  Done in code, COR-88 In Progress again (harness only; no device numbers),
+  COR-97 In Progress (reminder device QA), and COR-98 / COR-99 filed. The
+  CadenceRx Mobile v1.0 project is In Progress. CI is the mobile-only GitHub
+  Actions workflow in this unreleased section (COR-87), successor to closed
+  PR #17. Encryption stays field-level
+  AES-256-GCM with the key in `expo-secure-store`; the database file is not
+  SQLCipher and the app does not use `PRAGMA key`.
 
 ## [1.0.0-alpha.1] - 2026-10-16
 

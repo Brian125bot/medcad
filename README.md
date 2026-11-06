@@ -30,12 +30,15 @@ npm ci
 npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test
 ```
 
-- **Built:** encrypted local storage (`expo-sqlite` + AES-256-GCM, key in the OS
-  keystore), a pure schedule / streak / supply engine, and the add / edit
-  medication wizard.
-- **Not built yet:** the Today screen, Insights, Cabinet, notifications, sync.
-- **Heads-up:** nothing has been run on a real device yet (COR-88, COR-91).
-  Bundling was restored in COR-90 (`SpaceMono-Regular.ttf` in `mobile/assets/fonts/`).
+- **Built:** field-level encrypted local storage (`expo-sqlite` + AES-256-GCM in
+  each row's `enc_payload`, key in `expo-secure-store`; not SQLCipher, no
+  `PRAGMA key`), a pure schedule / streak / supply engine, the add / edit
+  medication wizard, the Today screen (COR-74), local dose reminders (COR-76)
+  and lock-screen Take / Snooze / Skip (COR-77).
+- **Not built yet:** Insights, Cabinet, sync.
+- **Heads-up:** nothing has been run on a real device yet (COR-88 storage
+  numbers, COR-91 wizard, COR-97 reminders). Bundling was restored in COR-90
+  (`SpaceMono-Regular.ttf` in `mobile/assets/fonts/`).
 - **CI (COR-87):** GitHub Actions (`.github/workflows/ci.yml`) runs that mobile
   gate on every pull request and push to `main`: `npm ci`, `tsc --noEmit`,
   `typecheck:storage`, lint, `npm test` (100 % coverage gate), `test:tz` and
@@ -64,8 +67,8 @@ mobile equivalent. `.aistudio/` holds planning artifacts from AI Studio.
 Two details that trip people up:
 
 - **Shared issue numbers.** The web code and tests call its notification engine
-  "COR-76"; Linear COR-76 is the *mobile* notification engine and is still in
-  the backlog.
+  "COR-76"; Linear COR-76 is the *mobile* notification engine and is Done in
+  code (`mobile/lib/notifications/`). Device QA is COR-97.
 - **`mobile/` is not fully standalone.** Two of its tests import
   `lib/medication-data.ts` from this root as the oracle for parity checks, so
   check out the whole repo to run them.

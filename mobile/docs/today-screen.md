@@ -61,9 +61,10 @@ skip. Failures (e.g. web) are ignored.
 
 ## Not done / known limits
 
-- **Snooze** is not offered yet: reminders exist (COR-76) but actions and
-  Snooze are COR-77. Tapping a reminder opens Today. The
-  swipe-left sheet only skips, with an optional reason saved as the log note.
+- **Snooze is not on the Today card.** Swipe-left only skips, with an optional
+  reason saved as the log note. Lock-screen **Snooze 15m** is COR-77 (code on
+  `main`, device checklist in [notifications.md](notifications.md)). Tapping a
+  reminder opens Today.
 - Undo of a take (or changing it to skipped / pending) refunds the units
   recorded on the log (`unitsTaken`, COR-96); logs from before that fix fall
   back to the slot's current dose, or 1 unit.

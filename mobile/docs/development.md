@@ -1,8 +1,8 @@
 # CadenceRx Mobile — Development Guide
 
-Everything you need to set up, run, test and change `mobile/`. Commands below
-were run for this guide on 2026-10-16 (Node 22.22.0, Linux) unless marked
-otherwise.
+Everything you need to set up, run, test and change `mobile/`. Status claims
+were checked against `main` `7d72238` on 2026-11-06. Command notes below were
+run for this guide on 2026-10-16 (Node 22.22.0, Linux) unless marked otherwise.
 
 ## Setup
 
@@ -29,7 +29,7 @@ npm ci            # use the lockfile (package-lock.json); there is no bun.lock h
 | Command | What it does | Notes |
 | --- | --- | --- |
 | `npm test` | All Node suites (`tests/*.test.ts`, `*.test.mts`, `storage-core.mts`) via `tsx`, then the vitest suite with coverage | ~10 s. **The main gate.** |
-| `npm run test:schedule` | Vitest only (`tests/*.spec.ts`) with coverage; **fails below 100 %** on `lib/schedule/**`, `lib/wizard/**`, `lib/today/**`, `lib/storage/device-benchmark.ts` and `lib/storage/diagnostics.ts` (see `vitest.config.ts`) | |
+| `npm run test:schedule` | Vitest only (`tests/*.spec.ts`) with coverage; **fails below 100 %** on `lib/schedule/**`, `lib/wizard/**`, `lib/today/**`, `lib/notifications/**` (Expo adapters, `index.ts`, `ports.ts`, `background-task.ts` and `notification-response.ts` excluded) and `lib/storage/{benchmark-access,database-file-scan,device-benchmark,diagnostics}.ts` (see `vitest.config.ts`) | |
 | `npm run test:tz` | The vitest suite once per time zone (UTC, America/Chicago, America/New_York, Pacific/Auckland, Asia/Kolkata, Pacific/Honolulu) | ~30 s. Run when touching date logic. |
 | `npx tsc --noEmit` | Typecheck the whole app project | must be clean |
 | `npm run typecheck:storage` | Typecheck the Node test project (`tsconfig.test.json`: `lib/**` and `tests/**`, minus the `expo-*` adapters) | must be clean |
@@ -83,11 +83,13 @@ and on the device, only the three ports differ.
 
 What is **not** covered:
 
-- React components and screens (`MedicationWizard`, the picker, the list, the tab bar and header) —
-  only manual testing, and none on a real device yet (COR-91).
-- `lib/storage/expo-*.ts` — device-only by nature (COR-88).
-- Coverage thresholds apply to `lib/schedule` and `lib/wizard` only, not to
-  `lib/storage` or `lib/domain`.
+- React components and screens (`MedicationWizard`, the picker, the list, the tab bar, the header, Today and Reminders) —
+  only manual testing, and none on a real device yet (COR-91, COR-97).
+- `lib/storage/expo-*.ts` and `lib/notifications/expo-*.ts` — device-only by nature (COR-88, COR-97).
+- Coverage thresholds apply to `lib/schedule`, `lib/wizard`, `lib/today`, the
+  pure `lib/notifications` modules, and the storage files named in the command
+  table. They do not apply to `lib/domain` or the rest of `lib/storage`
+  (repository, mappers, vault), which have tests without a threshold.
 
 Two parity specs (`schedule-parity`, `schedule-characterization`) import the
 **web module from the repo root** (`../../lib/medication-data`). They need the
@@ -129,7 +131,7 @@ the seed data deliberately uses anonymous IDs (`seed-med-N`).
 
 | Blocker | Effect | Tracking |
 | --- | --- | --- |
-| No device run of the storage layer or the wizard | Benchmark (< 15 ms write) and encrypted-at-rest are proven only under Node | **COR-88**, **COR-91** |
+| No device run of storage, the wizard, Today or reminders | The `< 15 ms` write benchmark and encrypted-at-rest claim are proven only under Node; reminder delivery is unit-tested only | **COR-88**, **COR-91**, **COR-97** |
 
 ## Troubleshooting
 

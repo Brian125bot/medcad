@@ -2,7 +2,8 @@
 
 Tooling to measure the COR-71 encrypted storage layer **on a physical phone**
 and produce evidence for [COR-88](https://linear.app/coretek/issue/COR-88).
-No device numbers have been recorded yet. Until someone runs this on hardware
+No device numbers have been recorded yet (checked 2026-11-06; COR-88 is
+In Progress again for that reason). Until someone runs this on hardware
 and pastes the result into COR-88, the desktop figures in
 [storage.md](storage.md#latency-benchmark-local-developer-machine--not-ci-not-device)
 remain the only numbers there are, and they are **not** device evidence.
