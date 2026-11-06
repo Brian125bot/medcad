@@ -1,5 +1,5 @@
 import { Link } from "expo-router";
-import { CloudOff } from "lucide-react-native";
+import { Bell, CloudOff } from "lucide-react-native";
 import { Pressable, Text, View } from "react-native";
 
 import { cadenceTokens } from "@/constants/theme";
@@ -27,10 +27,17 @@ export function TabHeaderTitle() {
   );
 }
 
-/** Shared tab header action: the quick "+ Add" link to the add medication modal. */
-export function TabHeaderActions() {
+/** Shared tab header actions: the quick "+ Add" link, plus the reminder settings bell on Regimen (COR-76). */
+export function TabHeaderActions({ showReminderSettings = false }: { showReminderSettings?: boolean }) {
   return (
-    <View className="mr-4">
+    <View className="mr-4 flex-row items-center">
+      {showReminderSettings ? (
+        <Link href="/reminder-settings" asChild>
+          <Pressable accessibilityRole="button" accessibilityLabel="Reminder settings" hitSlop={8} className="mr-3 p-1">
+            <Bell color={cadenceTokens.ink} size={20} />
+          </Pressable>
+        </Link>
+      ) : null}
       <Link href="/medication/new" asChild>
         <Pressable
           accessibilityRole="button"

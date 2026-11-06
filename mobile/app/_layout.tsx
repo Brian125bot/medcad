@@ -1,12 +1,15 @@
 import "../global.css";
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import { startReminderEngine } from "@/lib/notifications";
+import { getStorageContext } from "@/lib/storage";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -38,7 +41,24 @@ export default function RootLayout() {
     }
   }, [loaded, error]);
 
-  if (!loaded && !error) {
+  // COR-76: once the shell is up, keep dose reminders reconciled with storage.
+  const ready = Boolean(loaded || error);
+  useEffect(() => {
+    if (!ready) return;
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    getStorageContext()
+      .then((context) => {
+        if (!cancelled) stop = startReminderEngine(context, { onOpenToday: () => router.navigate("/today") });
+      })
+      .catch((startError) => console.warn("Reminder engine failed to start:", startError));
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [ready]);
+
+  if (!ready) {
     return null;
   }
 
@@ -52,6 +72,7 @@ export default function RootLayout() {
           <Stack.Screen name="modal" options={{ presentation: "modal" }} />
           <Stack.Screen name="medication/new" options={{ presentation: "modal" }} />
           <Stack.Screen name="medication/[id]" options={{ presentation: "modal" }} />
+          <Stack.Screen name="reminder-settings" options={{ presentation: "modal", title: "Reminders" }} />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -49,6 +49,7 @@ export default function TabLayout() {
               title,
               tabBarIcon: ({ color, size }) => <Icon color={color} size={size} />,
               tabBarBadge: name === "today" ? toTabBadge(dosesDueToday) : undefined,
+              ...(name === "regimen" ? { headerRight: () => <TabHeaderActions showReminderSettings /> } : {}),
             }}
           />
         );

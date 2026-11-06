@@ -67,3 +67,20 @@ const copied = rowsToDomainMedication(medicationRow, timeSlotRows);
 assert.notStrictEqual(copied.appearance, medicationRow.appearance);
 
 console.log('✓ mapper appearance handling');
+
+// COR-76 alert: round-trips, absent stays absent (readers default to sound + vibrate), invalid values dropped.
+{
+  const alerting = { ...medication, alert: { sound: false, vibrate: true } };
+  const rows = domainMedicationToRows(alerting);
+  assert.deepStrictEqual((rows.medicationRow as { alert?: unknown }).alert, { sound: false, vibrate: true });
+  assert.deepStrictEqual(rowsToDomainMedication(rows.medicationRow, rows.timeSlotRows).alert, { sound: false, vibrate: true });
+  const plain = domainMedicationToRows(medication);
+  assert.strictEqual((plain.medicationRow as { alert?: unknown }).alert, null);
+  assert.strictEqual('alert' in rowsToDomainMedication(plain.medicationRow, plain.timeSlotRows), false);
+  const { alert: _noAlert, ...preCor76Row } = plain.medicationRow;
+  assert.strictEqual('alert' in rowsToDomainMedication(preCor76Row, plain.timeSlotRows), false);
+  for (const bad of [null, 'loud', 1, { sound: true }, { sound: 'yes', vibrate: true }, { sound: true, vibrate: 0 }]) {
+    assert.strictEqual('alert' in rowsToDomainMedication({ ...rows.medicationRow, alert: bad }, rows.timeSlotRows), false);
+  }
+  console.log('✓ mapper alert handling');
+}

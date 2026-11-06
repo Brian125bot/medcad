@@ -1,6 +1,8 @@
 import {
+  isMedicationAlert,
   isPillAppearance,
   type Medication,
+  type MedicationAlert,
   type MedicationForm,
   type PillAppearance,
   type ScheduleFrequency,
@@ -18,6 +20,7 @@ export interface MedicationPhi {
   prescriber?: string | null;
   inventory_pharmacy_note?: string | null;
   appearance?: PillAppearance | null;
+  alert?: MedicationAlert | null;
 }
 
 export interface TimeSlotPhi {
@@ -35,6 +38,8 @@ export interface StoredMedicationRow extends MedicationRow {
   inventory_pharmacy_note?: string | null;
   /** Decoded from the encrypted payload; treated as untrusted on read. */
   appearance?: unknown;
+  /** COR-76 reminder sound/vibration; untrusted on read like appearance. */
+  alert?: unknown;
 }
 
 export interface StoredTimeSlotRow extends TimeSlotRow {
@@ -62,6 +67,7 @@ export function domainMedicationToRows(med: Medication): {
       interval_days: med.intervalDays || null,
       prescriber: med.prescriber || null,
       appearance: med.appearance ? { ...med.appearance } : null,
+      alert: med.alert ? { sound: med.alert.sound, vibrate: med.alert.vibrate } : null,
       active: med.active ? 1 : 0,
       inventory_current: med.inventory?.currentUnits ?? 0,
       inventory_capacity: med.inventory?.capacityUnits ?? 0,
@@ -119,6 +125,8 @@ export function rowsToDomainMedication(
     // Rows saved before the pill builder (or with a damaged payload) have no
     // valid appearance; omit the key rather than inventing a look.
     ...(isPillAppearance(medRow.appearance) ? { appearance: { ...medRow.appearance } } : {}),
+    // Rows saved before COR-76 have no alert; readers default it to sound + vibrate.
+    ...(isMedicationAlert(medRow.alert) ? { alert: { sound: medRow.alert.sound, vibrate: medRow.alert.vibrate } } : {}),
     active: medRow.active === 1,
     timeSlots: [...slotRows]
       .sort((a, b) => a.time.localeCompare(b.time))

@@ -60,6 +60,20 @@ export function isPillAppearance(value: unknown): value is PillAppearance {
   );
 }
 
+/** COR-76: how a medication's reminders sound. Absent means both on. */
+export interface MedicationAlert {
+  sound: boolean;
+  vibrate: boolean;
+}
+
+export const DEFAULT_MEDICATION_ALERT: MedicationAlert = { sound: true, vibrate: true };
+
+export function isMedicationAlert(value: unknown): value is MedicationAlert {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.sound === 'boolean' && typeof v.vibrate === 'boolean';
+}
+
 export interface MedicationInventory {
   currentUnits: number;
   capacityUnits: number;
@@ -80,6 +94,7 @@ export interface Medication {
   instructions: string; // e.g., "Take with breakfast and a full glass of water"
   prescriber?: string;
   appearance?: PillAppearance; // absent on medications saved before the pill builder
+  alert?: MedicationAlert;
   frequency: ScheduleFrequency;
   daysOfWeek?: number[]; // 0 (Sun) to 6 (Sat) if frequency === 'specific_days'
   intervalDays?: number; // e.g. every 2 days if frequency === 'interval'

@@ -12,5 +12,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["lib/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["lib/storage/expo-*.ts", "lib/storage/index.ts"]
+  "exclude": ["lib/storage/expo-*.ts", "lib/storage/index.ts", "lib/notifications/expo-*.ts", "lib/notifications/index.ts"]
 }

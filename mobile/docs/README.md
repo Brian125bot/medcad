@@ -20,6 +20,7 @@ verified — usually anything that needs a device — the page says so.
 | [device-benchmark.md](device-benchmark.md) | You need COR-88 device numbers: the dev-only storage benchmark screen, its gates, and how to run it on a phone. |
 | [schedule-engine.md](schedule-engine.md) | You touch "is it due / adherence / streak / supply" logic. The rules, the intentional differences from the web app, and how it's tested. |
 | [today-screen.md](today-screen.md) | You touch the Today tab: view model, optimistic store, rollback, gestures, rollover. |
+| [notifications.md](notifications.md) | You touch dose reminders: the post-commit hook, reconciler, planning rules, privacy, channels, and the device checklist (COR-76). |
 | [medication-wizard.md](medication-wizard.md) | You touch the add / edit flow: every field rule, form ⇄ `Medication` mapping, and a checklist for adding a field. |
 | [cor-71-plan.md](cor-71-plan.md) | History only. The original storage plan; the as-built layout differs (see its banner). |
 
