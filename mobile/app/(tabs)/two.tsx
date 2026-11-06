@@ -2,14 +2,15 @@ import { Link, Redirect } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { Info } from "lucide-react-native";
 
+import { cor88BenchmarkAccessEnabled } from "@/app/cor88-benchmark-access";
+
 /**
  * Theme reference screen (COR-70 scaffold).
  * Shows the NativeWind typography scale and confirms safe-area wiring.
- * A tab in development builds only (COR-73, `themeTabHref`); production
- * builds hide the tab and this screen redirects to Today.
+ * Hidden in production unless `EXPO_PUBLIC_COR88_BENCHMARK=1` at build time.
  */
 export default function ThemeScreen() {
-  if (!__DEV__) return <Redirect href="/today" />;
+  if (!cor88BenchmarkAccessEnabled(__DEV__)) return <Redirect href="/today" />;
 
   return (
     <ScrollView className="flex-1 bg-cadence-background">

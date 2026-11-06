@@ -5,6 +5,7 @@ import { Redirect, Stack } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, View } from "react-native";
 
+import { cor88BenchmarkAccessEnabled } from "@/app/cor88-benchmark-access";
 import { cadenceTokens } from "@/constants/theme";
 import { toDateKey } from "@/lib/schedule/date-keys";
 import {
@@ -21,12 +22,10 @@ import { createBenchmarkEnvironment, getAppStorageDiagnostics, runBenchmarkVault
 import { diagnosticsToText, recoveryToText } from "@/lib/storage/diagnostics";
 
 /**
- * COR-88 hardware storage benchmark (development builds only).
- * Runs against an isolated benchmark database + keychain entry, never the
- * user's vault. Results contain timings and pass/fail flags only.
- * Entry: the dev-only Theme tab → "Storage benchmark".
+ * COR-88 hardware storage benchmark (dev builds, or release with
+ * `EXPO_PUBLIC_COR88_BENCHMARK=1` at build time).
  */
-function readTelemetry(): DeviceTelemetry {
+function readTelemetry(benchmarkFlag: boolean): DeviceTelemetry {
   return {
     platform: Platform.OS,
     deviceModel: Device.modelName,
@@ -37,6 +36,7 @@ function readTelemetry(): DeviceTelemetry {
     isPhysicalDevice: Device.isDevice,
     appVersion: Constants.expoConfig?.version ?? null,
     buildMode: __DEV__ ? "debug" : "release",
+    benchmarkFlag,
   };
 }
 
@@ -56,9 +56,11 @@ export default function BenchmarkScreen() {
   const [diagBusy, setDiagBusy] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
 
-  if (!__DEV__) return <Redirect href="/today" />;
+  const benchmarkAccess = cor88BenchmarkAccessEnabled(__DEV__);
+  if (!benchmarkAccess) return <Redirect href="/today" />;
 
-  const telemetry = readTelemetry();
+  const benchmarkFlag = !__DEV__ && benchmarkAccess;
+  const telemetry = readTelemetry(benchmarkFlag);
 
   async function run() {
     setRunning(true);
@@ -116,7 +118,16 @@ export default function BenchmarkScreen() {
           <Row label="Physical device" value={telemetry.isPhysicalDevice ? "yes" : "no — simulator results are not COR-88 evidence"} />
           <Row label="OS" value={`${telemetry.osName ?? "?"} ${telemetry.osVersion ?? ""}`} />
           <Row label="Arch" value={telemetry.architecture ?? "unknown"} />
-          <Row label="Build" value={telemetry.buildMode === "release" ? "release" : "debug — re-run in release for quotable numbers"} />
+          <Row
+            label="Build"
+            value={
+              telemetry.buildMode === "release"
+                ? telemetry.benchmarkFlag
+                  ? "release (quotable; enabled by EXPO_PUBLIC_COR88_BENCHMARK)"
+                  : "release"
+                : "debug — re-run in release for quotable numbers"
+            }
+          />
           <Row label="Encryption" value={`${ENCRYPTION_BACKEND.cipher} field-level, key in SecureStore (not SQLCipher)`} />
         </View>
 
