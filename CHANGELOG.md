@@ -26,6 +26,12 @@ the issue id and PR number where there are any.
 ## [Unreleased]
 
 ### Added
+- **[mobile]** COR-77 interactive lock-screen dose actions (not
+  device-tested): `dose_reminder` category with Take, Snooze 15m, and Skip;
+  background handler writes via `MedicationRepository.logDose`, schedules
+  `cx.snooze.` follow-ups outside the dose budget, syncs the app badge to
+  pending doses for today, and keeps the COR-76 reconciler / port boundaries.
+  Physical-device checklist is in `mobile/docs/notifications.md`.
 - **[mobile]** COR-76 local dose reminders (expo-notifications 57, not
   device-tested): post-commit `MedicationRepository.subscribe()` change events
   drive a single-flight `ReminderEngine` that reconciles a 14-day, 48-entry

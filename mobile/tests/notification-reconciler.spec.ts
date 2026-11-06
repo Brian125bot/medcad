@@ -18,6 +18,7 @@ import { INITIAL_REMINDER_STATUS, ReminderEngine } from '../lib/notifications/re
 import { PREF_SHOW_MEDICATION_NAMES } from '../lib/notifications/settings';
 import type { CivilNow } from '../lib/notifications/types';
 import type { RepositoryListener } from '../lib/storage/context';
+import { buildDoseKey } from '../lib/schedule/doses';
 import { makeMed } from './notification-fixtures';
 
 function fakeRepository(medications: Medication[] = [makeMed()]) {
@@ -55,11 +56,24 @@ function fakeScheduler() {
     scheduled,
     calls: [] as string[],
     failNext: false,
+    badgeCount: null as number | null,
     async ensureChannels() {
       s.calls.push('channels');
     },
+    async ensureActionCategories() {
+      s.calls.push('categories');
+    },
     async listScheduled() {
-      return [...scheduled.values()].map(({ id, fireAtMs, contentHash, exact }) => ({ id, fireAtMs, contentHash, exact }));
+      return [...scheduled.values()].map(({ id, fireAtMs, contentHash, exact, request }) => ({
+        id,
+        fireAtMs,
+        contentHash,
+        exact,
+        doseKeys:
+          request?.content.data.kind === 'dose-group'
+            ? request.content.data.doses.map((d) => buildDoseKey(d.d, d.m, d.s))
+            : undefined,
+      }));
     },
     async schedule(request: ReminderScheduleRequest) {
       if (s.failNext) {
@@ -72,6 +86,9 @@ function fakeScheduler() {
     async cancel(id: string) {
       s.calls.push(`cancel ${id}`);
       scheduled.delete(id);
+    },
+    async setBadgeCount(count: number) {
+      s.badgeCount = count;
     },
   };
   return s satisfies NotificationSchedulerPort;
@@ -129,8 +146,11 @@ describe('ReminderEngine.reconcile', () => {
     await engine.reconcile();
     // 14 daily doses plus the window-end sentinel.
     expect(doseIds(scheduler)).toHaveLength(15);
-    expect(scheduler.calls[0]).toBe('channels');
-    expect(repository.ranges).toEqual([['2026-10-16', '2026-10-30']]);
+    expect(scheduler.calls.slice(0, 2)).toEqual(['channels', 'categories']);
+    expect(repository.ranges).toEqual([
+      ['2026-10-16', '2026-10-30'],
+      ['2026-10-16', '2026-10-16'],
+    ]);
     expect(engine.getStatus()).toEqual({ state: 'ok', lastReconciledAt: '2026-10-16T12:00:00.000Z', scheduledCount: 15, truncated: false });
     const first = scheduler.scheduled.get('cx.dose.2026-10-16.0800')!.request!;
     expect(first.fireAtMs).toBe(Date.UTC(2026, 9, 16, 8));
@@ -142,7 +162,7 @@ describe('ReminderEngine.reconcile', () => {
     await engine.reconcile();
     scheduler.calls.length = 0;
     await engine.reconcile();
-    expect(scheduler.calls).toEqual(['channels']);
+    expect(scheduler.calls).toEqual(['channels', 'categories']);
   });
 
   it('reschedules on edit and cancels on delete', async () => {
@@ -171,7 +191,12 @@ describe('ReminderEngine.reconcile', () => {
     scheduler.scheduled.get('cx.dose.2026-10-17.0800')!.fireAtMs = 1;
     scheduler.calls.length = 0;
     await engine.reconcile();
-    expect(scheduler.calls).toEqual(['channels', 'cancel cx.dose.2026-10-17.0800', 'schedule cx.dose.2026-10-17.0800']);
+    expect(scheduler.calls).toEqual([
+      'channels',
+      'categories',
+      'cancel cx.dose.2026-10-17.0800',
+      'schedule cx.dose.2026-10-17.0800',
+    ]);
   });
 
   it('drops a dose once it is logged', async () => {

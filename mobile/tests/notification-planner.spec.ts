@@ -256,4 +256,11 @@ describe('planNotifications — window-end sentinel', () => {
     expect(cut.notifications).toHaveLength(14);
     expect(cut.notifications.at(-1)!.fireAt).toEqual({ dateKey: '2026-10-28', minuteOfDay: 485 });
   });
+
+  it('skips doses with an active snooze (COR-77)', () => {
+    const snoozed = new Set(['2026-10-16_med-a_slot-am']);
+    const p = plan(undefined, {}, { snoozedDoseKeys: snoozed });
+    expect(ids(p)).not.toContain('cx.dose.2026-10-16.0800');
+    expect(ids(p)).toContain('cx.dose.2026-10-17.0800');
+  });
 });

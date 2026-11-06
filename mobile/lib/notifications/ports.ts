@@ -16,6 +16,8 @@ export interface ScheduledReminder {
   contentHash: string | null;
   /** Whether it was scheduled as an exact alarm; null when absent (no metadata). */
   exact: boolean | null;
+  /** Dose keys in `data.doses`, when the payload is a dose group (COR-77 snooze suppression). */
+  doseKeys?: string[];
 }
 
 export interface ReminderScheduleRequest {
@@ -29,9 +31,13 @@ export interface ReminderScheduleRequest {
 export interface NotificationSchedulerPort {
   /** Creates the fixed Android channels (no-op elsewhere). Must run before `schedule`. */
   ensureChannels(): Promise<void>;
+  /** Registers interactive lock-screen categories (COR-77). */
+  ensureActionCategories(): Promise<void>;
   listScheduled(): Promise<ScheduledReminder[]>;
   schedule(request: ReminderScheduleRequest): Promise<void>;
   cancel(id: string): Promise<void>;
+  /** Sets the home-screen badge to pending doses for today; no-op where unsupported. */
+  setBadgeCount(count: number): Promise<void>;
 }
 
 export type NotificationPermission = 'granted' | 'denied' | 'undetermined';
