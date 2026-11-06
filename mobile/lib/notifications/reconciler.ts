@@ -10,7 +10,11 @@ import type { RepositoryChange } from '../storage/context';
 import { computeTodayPendingBadgeCount } from './badge-count';
 import { buildReminderContent, hashReminderContent } from './content';
 import { planNotifications, planningDateRange } from './planner';
+import { PREF_EXACT_ALARM_PROMPTED } from './exact-alarm';
+import { dateKeyFromDoseKey } from './pending-doses';
+import { PREF_HANDLED_ACTION_RESPONSES } from './response-dedupe';
 import { collectSnoozedDoseKeys } from './snooze';
+import { staleSnoozeIds } from './stale-snoozes';
 import type {
   ClockPort,
   NotificationPermission,
@@ -20,7 +24,7 @@ import type {
   ReminderScheduleRequest,
 } from './ports';
 import { readReminderSettings } from './settings';
-import { DOSE_NAMESPACE, type ReminderStatus } from './types';
+import { DOSE_NAMESPACE, SNOOZE_NAMESPACE, type ReminderStatus } from './types';
 
 export interface ReminderEngineDeps {
   repository: ReminderRepositoryPort;
@@ -74,6 +78,14 @@ export class ReminderEngine {
   }
 
   handleChange(change: RepositoryChange): Promise<void> {
+    if (change.type === 'preference-changed') {
+      if (
+        change.prefKey === PREF_HANDLED_ACTION_RESPONSES ||
+        change.prefKey === PREF_EXACT_ALARM_PROMPTED
+      ) {
+        return Promise.resolve();
+      }
+    }
     if (change.type === 'vault-deleted') this.vaultWipePending = true;
     return this.reconcile();
   }
@@ -109,10 +121,12 @@ export class ReminderEngine {
     for (const listener of [...this.statusListeners]) listener();
   }
 
-  private async cancelDoseNamespace(): Promise<void> {
+  private async cancelDoseAndSnoozeNamespaces(): Promise<void> {
     const { scheduler } = this.deps;
     for (const entry of await scheduler.listScheduled()) {
-      if (entry.id.startsWith(DOSE_NAMESPACE)) await scheduler.cancel(entry.id);
+      if (entry.id.startsWith(DOSE_NAMESPACE) || entry.id.startsWith(SNOOZE_NAMESPACE)) {
+        await scheduler.cancel(entry.id);
+      }
     }
   }
 
@@ -122,7 +136,7 @@ export class ReminderEngine {
       if (this.vaultWipePending) {
         // The vault is gone: do not read it, just drop every dose reminder.
         this.vaultWipePending = false;
-        await this.cancelDoseNamespace();
+        await this.cancelDoseAndSnoozeNamespaces();
         await scheduler.setBadgeCount(0);
         this.setStatus({ ...INITIAL_REMINDER_STATUS, lastReconciledAt: clock.nowIso() });
         return;
@@ -150,14 +164,23 @@ export class ReminderEngine {
       const now = clock.now();
       const nowMs = clock.toEpochMs(now.todayKey, now.minuteOfDay);
       const scheduledBefore = await scheduler.listScheduled();
-      const snoozedDoseKeys = collectSnoozedDoseKeys(scheduledBefore, nowMs);
       const { startKey, endKey } = planningDateRange(now.todayKey);
-      const [medications, settings, entries] = await Promise.all([
-        repository.getAllMedications(),
-        readReminderSettings(repository),
-        repository.getDoseLogsInRange(startKey, endKey),
-      ]);
-      const logs = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
+      let logStartKey = startKey;
+      for (const entry of scheduledBefore) {
+        for (const doseKey of entry.doseKeys ?? []) {
+          const dateKey = dateKeyFromDoseKey(doseKey);
+          if (dateKey && dateKey < logStartKey) logStartKey = dateKey;
+        }
+      }
+      const medications = await repository.getAllMedications();
+      const activeMedicationIds = new Set(medications.filter((med) => med.active).map((med) => med.id));
+      const logEntries = await repository.getDoseLogsInRange(logStartKey, endKey);
+      const logs = Object.fromEntries(logEntries.map((entry) => [entry.key, entry]));
+      const staleSnoozes = staleSnoozeIds(scheduledBefore, logs, activeMedicationIds);
+      for (const snoozeId of staleSnoozes) await scheduler.cancel(snoozeId);
+      const scheduledActive = scheduledBefore.filter((entry) => !staleSnoozes.includes(entry.id));
+      const snoozedDoseKeys = collectSnoozedDoseKeys(scheduledActive, nowMs);
+      const settings = await readReminderSettings(repository);
       const plan = planNotifications({ medications, logs, settings, now, snoozedDoseKeys });
 
       const desired = new Map<string, ReminderScheduleRequest & { hash: string }>();

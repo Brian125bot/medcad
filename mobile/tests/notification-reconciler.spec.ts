@@ -15,6 +15,8 @@ import type {
   ScheduledReminder,
 } from '../lib/notifications/ports';
 import { INITIAL_REMINDER_STATUS, ReminderEngine } from '../lib/notifications/reconciler';
+import { PREF_EXACT_ALARM_PROMPTED } from '../lib/notifications/exact-alarm';
+import { PREF_HANDLED_ACTION_RESPONSES } from '../lib/notifications/response-dedupe';
 import { PREF_SHOW_MEDICATION_NAMES } from '../lib/notifications/settings';
 import type { CivilNow } from '../lib/notifications/types';
 import { SNOOZE_NAMESPACE } from '../lib/notifications/types';
@@ -92,6 +94,7 @@ function fakeScheduler() {
       s.calls.push(`cancel ${id}`);
       scheduled.delete(id);
     },
+    async dismiss(_id: string) {},
     async setBadgeCount(count: number) {
       s.badgeCount = count;
     },
@@ -229,13 +232,76 @@ describe('ReminderEngine.reconcile', () => {
 
   it('never touches foreign namespaces', async () => {
     const { engine, scheduler, repository } = setup();
-    scheduler.scheduled.set('cx.snooze.x', { id: 'cx.snooze.x', fireAtMs: 1, contentHash: null, exact: null });
+    scheduler.scheduled.set('cx.snooze.x', {
+      id: 'cx.snooze.x',
+      fireAtMs: Date.UTC(2026, 9, 16, 9),
+      contentHash: null,
+      exact: null,
+      doseKeys: ['2026-10-17_med-a_slot-am'],
+    });
     scheduler.scheduled.set('cx.refill.y', { id: 'cx.refill.y', fireAtMs: 1, contentHash: null, exact: null });
     scheduler.scheduled.set('cx.dose.stale', { id: 'cx.dose.stale', fireAtMs: 1, contentHash: null, exact: null });
     await engine.reconcile();
     repository.medications = [];
     await engine.reconcile();
-    expect([...scheduler.scheduled.keys()].sort()).toEqual(['cx.refill.y', 'cx.snooze.x']);
+    expect([...scheduler.scheduled.keys()].sort()).toEqual(['cx.refill.y']);
+  });
+
+  it('ignores dedupe and exact-alarm prompt preference changes', async () => {
+    const { engine, scheduler } = setup();
+    await engine.reconcile();
+    scheduler.calls.length = 0;
+    await engine.handleChange({ type: 'preference-changed', prefKey: PREF_HANDLED_ACTION_RESPONSES });
+    await engine.handleChange({ type: 'preference-changed', prefKey: PREF_EXACT_ALARM_PROMPTED });
+    expect(scheduler.calls).toEqual([]);
+  });
+
+  it('widens log reads when a scheduled snooze references an earlier dose date', async () => {
+    const { engine, repository, scheduler } = setup();
+    scheduler.scheduled.set(`${SNOOZE_NAMESPACE}2026-10-16.0815`, {
+      id: `${SNOOZE_NAMESPACE}2026-10-16.0815`,
+      fireAtMs: Date.UTC(2026, 9, 16, 8, 15),
+      contentHash: null,
+      exact: true,
+      doseKeys: ['2026-10-15_med-a_slot-am'],
+    });
+    repository.ranges.length = 0;
+    await engine.reconcile();
+    expect(repository.ranges.some(([start]) => start === '2026-10-15')).toBe(true);
+  });
+
+  it('keeps a snooze while any listed dose is still pending', async () => {
+    const { engine, scheduler, repository } = setup();
+    const snoozeId = `${SNOOZE_NAMESPACE}2026-10-16.0815`;
+    scheduler.scheduled.set(snoozeId, {
+      id: snoozeId,
+      fireAtMs: Date.UTC(2026, 9, 16, 8, 15),
+      contentHash: null,
+      exact: true,
+      doseKeys: ['2026-10-16_med-a_slot-am', '2026-10-16_med-b_slot-am'],
+    });
+    repository.medications = [makeMed(), makeMed({ id: 'med-b', timeSlots: [{ id: 'slot-am', time: '08:00', remindersEnabled: true }] })];
+    repository.logs = [
+      { key: '2026-10-16_med-a_slot-am', dateKey: '2026-10-16', medicationId: 'med-a', slotId: 'slot-am', status: 'taken', loggedAt: '08:05' },
+    ];
+    await engine.reconcile();
+    expect(scheduler.scheduled.has(snoozeId)).toBe(true);
+  });
+
+  it('cancels stale snoozes when doses were logged in-app', async () => {
+    const { engine, scheduler, repository } = setup();
+    scheduler.scheduled.set(`${SNOOZE_NAMESPACE}2026-10-16.0815`, {
+      id: `${SNOOZE_NAMESPACE}2026-10-16.0815`,
+      fireAtMs: Date.UTC(2026, 9, 16, 8, 15),
+      contentHash: null,
+      exact: true,
+      doseKeys: ['2026-10-16_med-a_slot-am'],
+    });
+    repository.logs = [
+      { key: '2026-10-16_med-a_slot-am', dateKey: '2026-10-16', medicationId: 'med-a', slotId: 'slot-am', status: 'taken', loggedAt: '08:05' },
+    ];
+    await engine.reconcile();
+    expect(scheduler.scheduled.has(`${SNOOZE_NAMESPACE}2026-10-16.0815`)).toBe(false);
   });
 
   it('schedules nothing without permission', async () => {
@@ -309,13 +375,13 @@ describe('ReminderEngine lifecycle', () => {
     expect(repository.listenerCount()).toBe(0);
   });
 
-  it('vault deletion cancels only cx.dose. and does not read the vault', async () => {
+  it('vault deletion cancels cx.dose. and cx.snooze. without reading the vault', async () => {
     const { engine, scheduler, repository } = setup();
     await engine.reconcile();
     scheduler.scheduled.set('cx.snooze.keep', { id: 'cx.snooze.keep', fireAtMs: 1, contentHash: null, exact: null });
     const reads = repository.medicationReads;
     await engine.handleChange({ type: 'vault-deleted' });
-    expect([...scheduler.scheduled.keys()]).toEqual(['cx.snooze.keep']);
+    expect([...scheduler.scheduled.keys()]).toEqual([]);
     expect(repository.medicationReads).toBe(reads);
     expect(engine.getStatus()).toEqual({ ...INITIAL_REMINDER_STATUS, lastReconciledAt: '2026-10-16T12:00:00.000Z' });
   });

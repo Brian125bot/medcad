@@ -41,6 +41,7 @@ function trackingScheduler() {
     async cancel(id: string) {
       scheduled.delete(id);
     },
+    async dismiss(_id: string) {},
     async setBadgeCount() {},
   };
 }
