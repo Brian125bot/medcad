@@ -49,7 +49,12 @@ export default function RootLayout() {
     let cancelled = false;
     getStorageContext()
       .then((context) => {
-        if (!cancelled) stop = startReminderEngine(context, { onOpenToday: () => router.navigate("/today") });
+        if (!cancelled) {
+          stop = startReminderEngine(context, {
+            onOpenToday: () => router.navigate("/today"),
+            onOpenCabinet: () => router.navigate("/cabinet"),
+          });
+        }
       })
       .catch((startError) => console.warn("Reminder engine failed to start:", startError));
     return () => {

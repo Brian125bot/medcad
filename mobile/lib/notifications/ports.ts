@@ -67,5 +67,6 @@ export interface ReminderRepositoryPort {
   getAllMedications(): Promise<Medication[]>;
   getDoseLogsInRange(startKey: string, endKey: string): Promise<DoseLogEntry[]>;
   getPreference<T>(prefKey: string, defaultValue: T): Promise<T>;
+  setPreference<T>(prefKey: string, value: T): Promise<void>;
   subscribe(listener: RepositoryListener): () => void;
 }
