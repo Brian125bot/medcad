@@ -7,8 +7,9 @@ web app's `lib/medication-data.ts` is ported here in later issues).
 
 **Status (2026-10-16):** the data layer is built — encrypted local storage
 (COR-71) and the schedule / streak / supply engine (COR-72) — plus the
-add / edit medication wizard (COR-75). Today, Insights, Cabinet and
-notifications are not built yet. The app bundles again after COR-90 restored
+add / edit medication wizard (COR-75), Today (COR-74) and local dose
+reminders (COR-76, [`docs/notifications.md`](docs/notifications.md)). Insights
+and Cabinet are not built yet. The app bundles again after COR-90 restored
 `assets/fonts/SpaceMono-Regular.ttf`; tests, typecheck and lint work. Nothing
 has been run on a device yet (COR-91).
 

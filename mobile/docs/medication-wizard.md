@@ -132,8 +132,10 @@ These are current behaviours, not endorsements — several are tracked in the
   see [storage.md](storage.md#behaviours-worth-knowing)).
 - **`nextFillDate` is not recalculated** when schedule or inventory change
   (COR-94).
-- **No notification hook.** Saving does not (re)schedule reminders; COR-76
-  requires a single post-save hook in the storage/app layer, not in screens.
+- **Reminders.** Saving emits a repository change event and the COR-76
+  reminder engine reschedules; the wizard only asks for notification
+  permission (on save with reminders on, or when a reminder switch is turned
+  on). See [notifications.md](notifications.md).
 - **No delete or pause UI.** `deleteMedication` and `toggleActiveMedication`
   exist on the repository but no screen calls them.
 - **Never validated on a device.** The iOS inline spinner / Android dialog

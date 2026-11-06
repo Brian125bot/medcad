@@ -228,4 +228,5 @@ the mobile app. It is being replaced, not extended.
   web app, not mobile. They carry a scope notice pointing back here.
 - Issue numbers overlap: the web app already ships a notification engine
   (referred to as "COR-76" in web docs and tests), while the *Linear* issue
-  COR-76 is the **mobile** notification engine and is still in the backlog.
+  COR-76 is the **mobile** notification engine in `mobile/lib/notifications/`
+  ([notifications.md](notifications.md)).

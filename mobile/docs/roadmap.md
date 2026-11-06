@@ -42,7 +42,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
-| COR-76 | Native background alarm and notification engine | 5 | Backlog | Urgent. Unblocked (needs COR-70 ✔, 71 ✔, 72 ✔). Requires a **single post-save hook** in the storage/app layer — no screen schedules notifications itself |
+| COR-76 | Native background alarm and notification engine | 5 | In review | Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Not device-tested; Android exact-alarm denial is not detectable from JS |
 | COR-77 | Interactive lock-screen notification actions | 5 | Backlog | Blocked by COR-74 and COR-76 |
 
 ### M4 — Cabinet, refills and calendar sync
@@ -103,9 +103,8 @@ that are not recorded here.
    only been type-checked.
 3. ~~**COR-93**~~ — in review: orphan logs keep a `slotSnapshot` and count as
    history; Today shows current slots only.
-4. **COR-76** is independent of 73/74 and can run in parallel; its design work
-   (post-save hook, rolling schedule window) needs no device, its acceptance
-   test does.
+4. **COR-76** — in review; its acceptance checklist
+   ([notifications.md](notifications.md#device-acceptance-checklist)) needs a device.
 
 ## Known gaps and sharp edges
 
@@ -120,7 +119,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 5 | `logDose` doesn't validate ids | An unknown medication id writes an orphan log row without error; an unknown slot id assumes 1 unit | [storage.md](storage.md#behaviours-worth-knowing) | Untracked |
 | 6 | ~~Edit saves a snapshot of `currentUnits`~~ **Fixed** | The editor now saves with `inventoryBaseline`; the repository re-reads stock under the write gate and applies only the user's change, so doses logged while the editor is open survive | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-95 (Done) |
 | 7 | `nextFillDate` / calendar event not recomputed on edit | Stored fill date can be wrong after schedule or stock edits | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-94 |
-| 8 | No notification hook | Saving or deleting a medication schedules nothing. `deleteMedication` doesn't go through `saveMedication`, so a hook must cover both | [architecture.md](architecture.md#5-runtime-flows) | COR-76 |
+| 8 | ~~No notification hook~~ **Handled** | Every repository mutation (including `deleteMedication`, dose logs and preferences) emits a post-commit change event; the reminder engine reschedules from it | [notifications.md](notifications.md) | COR-76 |
 | 9 | Migration runner is a single step | There is no per-version logic, and the audit-row text is hard-coded to v1. Adding a v2 needs the ordered-step structure first (not needed for payload-only fields) | [storage.md](storage.md#schema-versions-and-migrations) | Untracked (becomes necessary with the first column change) |
 | 10 | No delete / pause UI | `deleteMedication` and `toggleActiveMedication` exist but no screen calls them | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |
 | 11 | No CI | `.github/` has never existed; the local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
