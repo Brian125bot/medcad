@@ -4,8 +4,11 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import type { StorageContext } from '../storage/context';
 import { executeNotificationAction, type ActionExecutorDeps } from './action-executor';
+import {
+  resolveNotificationResponseContext,
+  type NotificationResponseContext,
+} from './notification-response-context';
 import { toExactAlarmStatus } from './exact-alarm';
 import { canScheduleExactAlarms } from './expo-exact-alarm';
 import { createExpoPermissions, createExpoScheduler } from './expo-scheduler';
@@ -19,10 +22,12 @@ import {
   SNOOZE_NAMESPACE,
 } from './types';
 
-type ResponseContext = Pick<StorageContext, 'repository'>;
-
-let wiredContext: ResponseContext | null = null;
 let processing: Promise<void> | null = null;
+
+export {
+  setNotificationResponseContextProvider,
+  wireNotificationResponseContext,
+} from './notification-response-context';
 
 const ACTION_IDS = new Set([ACTION_TAKE_DOSE, ACTION_SNOOZE_15M, ACTION_SKIP_DOSE]);
 
@@ -30,7 +35,7 @@ function isReminderNotification(id: string): boolean {
   return id.startsWith(DOSE_NAMESPACE) || id.startsWith(SNOOZE_NAMESPACE);
 }
 
-function buildDeps(context: ResponseContext): ActionExecutorDeps {
+function buildDeps(context: NotificationResponseContext): ActionExecutorDeps {
   return {
     repository: context.repository,
     scheduler: createExpoScheduler(),
@@ -45,12 +50,8 @@ async function exactFlag(): Promise<boolean> {
   return exactStatus !== 'denied';
 }
 
-export function wireNotificationResponseContext(context: ResponseContext): void {
-  wiredContext = context;
-}
-
 export async function dispatchNotificationResponse(response: Notifications.NotificationResponse): Promise<void> {
-  const context = wiredContext;
+  const context = await resolveNotificationResponseContext();
   if (!context) return;
   const { actionIdentifier, notification } = response;
   const id = notification.request.identifier;

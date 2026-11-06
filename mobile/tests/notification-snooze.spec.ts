@@ -24,12 +24,12 @@ describe('snooze helpers', () => {
         {
           id: `${SNOOZE_NAMESPACE}2026-10-16.0825`,
           fireAtMs: Date.now() + 60_000,
-          doses: [{ dateKey: '2026-10-16', medicationId: 'm1', slotId: 's1' }],
+          doseKeys: ['2026-10-16_m1_s1'],
         },
         {
           id: `${SNOOZE_NAMESPACE}2026-10-16.0700`,
           fireAtMs: 1,
-          doses: [{ dateKey: '2026-10-16', medicationId: 'm2', slotId: 's2' }],
+          doseKeys: ['2026-10-16_m2_s2'],
         },
       ],
       Date.now(),

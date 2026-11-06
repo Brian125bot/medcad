@@ -37,7 +37,8 @@ describe('notification boundary', () => {
 
   it('pure engine modules import no React, React Native, or Expo packages', () => {
     const pure = sourceFiles(join(ROOT, 'lib', 'notifications')).filter(
-      (file) => !/\/(expo-[^/]+|index|background-task|notification-response)\.ts$/.test(file),
+      (file) =>
+        !/\/(expo-[^/]+|index|background-task|notification-response)\.ts$/.test(file),
     );
     expect(pure.length).toBeGreaterThanOrEqual(8);
     const offenders = pure.filter((file) => imports(file).some((spec) => /^(react|react-native|expo)(-|\/|$)/.test(spec)));

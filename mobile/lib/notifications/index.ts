@@ -17,6 +17,8 @@ import {
   createExpoScheduler,
   subscribeToReminderTaps,
 } from './expo-scheduler';
+import { getStorageContext } from '../storage';
+import { setNotificationResponseContextProvider } from './notification-response-context';
 import {
   dispatchNotificationResponse,
   isDefaultReminderTap,
@@ -24,6 +26,8 @@ import {
   subscribeToReminderActions,
   wireNotificationResponseContext,
 } from './notification-response';
+
+setNotificationResponseContextProvider(() => getStorageContext());
 import type { NotificationPermission } from './ports';
 import { INITIAL_REMINDER_STATUS, ReminderEngine } from './reconciler';
 import type { ReminderStatus } from './types';

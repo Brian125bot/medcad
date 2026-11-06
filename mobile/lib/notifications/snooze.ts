@@ -1,11 +1,10 @@
 /**
  * COR-77: snooze notification ids and fire instants (pure).
  */
-import { buildDoseKey } from '../schedule/doses';
 import { civilInstantKey, shiftCivil } from './fire-time';
 import type { CivilInstant } from './types';
 import { SNOOZE_DELAY_MINUTES, SNOOZE_NAMESPACE } from './types';
-import type { DosePayloadRef } from './payload';
+import type { ScheduledReminder } from './ports';
 
 export function snoozeFireInstant(from: CivilInstant, delayMinutes = SNOOZE_DELAY_MINUTES): CivilInstant {
   return shiftCivil(from, delayMinutes);
@@ -22,19 +21,15 @@ export function buildSnoozeNotificationId(fireAt: CivilInstant, reserved: Readon
   return `${base}.${Date.now()}`;
 }
 
-export function doseKeysFromPayload(doses: DosePayloadRef[]): string[] {
-  return doses.map((d) => buildDoseKey(d.dateKey, d.medicationId, d.slotId));
-}
-
 export function collectSnoozedDoseKeys(
-  scheduled: ReadonlyArray<{ id: string; fireAtMs: number | null; doses?: DosePayloadRef[] }>,
+  scheduled: ReadonlyArray<Pick<ScheduledReminder, 'id' | 'fireAtMs' | 'doseKeys'>>,
   nowMs: number,
 ): Set<string> {
   const keys = new Set<string>();
   for (const entry of scheduled) {
-    if (!entry.id.startsWith(SNOOZE_NAMESPACE) || !entry.doses?.length) continue;
+    if (!entry.id.startsWith(SNOOZE_NAMESPACE) || !entry.doseKeys?.length) continue;
     if (entry.fireAtMs !== null && entry.fireAtMs <= nowMs) continue;
-    for (const key of doseKeysFromPayload(entry.doses)) keys.add(key);
+    for (const key of entry.doseKeys) keys.add(key);
   }
   return keys;
 }

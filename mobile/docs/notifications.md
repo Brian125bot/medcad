@@ -163,8 +163,10 @@ scheduler ports. Malformed `data` is rejected; logs record **error class names
 only** (no PHI).
 
 **Snooze suppression.** While a `cx.snooze.` entry is still scheduled
-(`fireAtMs` in the future), the planner skips those doses so the reconciler
-does not re-arm the original `cx.dose.` reminder.
+(`fireAtMs` in the future), the reconciler reads each entry's `doseKeys` (from
+`listScheduled()`, derived from notification `data.doses` at schedule time) and
+the planner skips those doses so it does not re-arm the original `cx.dose.`
+reminder.
 
 **Badge.** After every action and every reconcile, `setBadgeCount` sets the app
 badge to pending doses for **today** using the same `countPendingDoses` helper as
@@ -173,8 +175,10 @@ the Today tab (`getScheduledDosesForDate` + logs). Zero pending clears the badge
 **Background delivery.** `addNotificationResponseReceivedListener` handles
 actions while the app is foregrounded or backgrounded. On Android, a
 `expo-task-manager` task (`cadencerx-reminder-action`) also runs action taps
-when the app is killed. Cold-start action taps are processed in
-`startReminderEngine` before navigation; body taps still open Today.
+when the app is killed; both paths call `resolveNotificationResponseContext()`,
+which lazy-loads `getStorageContext()` when the engine has not wired storage yet.
+Cold-start action taps are processed in `startReminderEngine` before navigation;
+body taps still open Today.
 
 **Device follow-up (not verified in CI):** extend COR-97 or run the checklist
 items below on a physical iPhone and Android development build.

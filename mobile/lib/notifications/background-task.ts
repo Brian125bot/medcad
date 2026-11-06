@@ -5,8 +5,12 @@
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 
+import { getStorageContext } from '../storage';
 import { dispatchNotificationResponse } from './notification-response';
+import { setNotificationResponseContextProvider } from './notification-response-context';
 import { REMINDER_ACTION_BACKGROUND_TASK } from './types';
+
+setNotificationResponseContextProvider(() => getStorageContext());
 
 export { REMINDER_ACTION_BACKGROUND_TASK };
 

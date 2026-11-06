@@ -17,6 +17,7 @@ import type {
 import { INITIAL_REMINDER_STATUS, ReminderEngine } from '../lib/notifications/reconciler';
 import { PREF_SHOW_MEDICATION_NAMES } from '../lib/notifications/settings';
 import type { CivilNow } from '../lib/notifications/types';
+import { SNOOZE_NAMESPACE } from '../lib/notifications/types';
 import type { RepositoryListener } from '../lib/storage/context';
 import { buildDoseKey } from '../lib/schedule/doses';
 import { makeMed } from './notification-fixtures';
@@ -51,7 +52,10 @@ function fakeRepository(medications: Medication[] = [makeMed()]) {
 }
 
 function fakeScheduler() {
-  const scheduled = new Map<string, ScheduledReminder & { request?: ReminderScheduleRequest }>();
+  const scheduled = new Map<
+    string,
+    ScheduledReminder & { request?: ReminderScheduleRequest; doseKeys?: string[] }
+  >();
   const s = {
     scheduled,
     calls: [] as string[],
@@ -64,15 +68,16 @@ function fakeScheduler() {
       s.calls.push('categories');
     },
     async listScheduled() {
-      return [...scheduled.values()].map(({ id, fireAtMs, contentHash, exact, request }) => ({
+      return [...scheduled.values()].map(({ id, fireAtMs, contentHash, exact, request, doseKeys }) => ({
         id,
         fireAtMs,
         contentHash,
         exact,
         doseKeys:
-          request?.content.data.kind === 'dose-group'
+          doseKeys ??
+          (request?.content.data.kind === 'dose-group'
             ? request.content.data.doses.map((d) => buildDoseKey(d.d, d.m, d.s))
-            : undefined,
+            : undefined),
       }));
     },
     async schedule(request: ReminderScheduleRequest) {
@@ -205,6 +210,21 @@ describe('ReminderEngine.reconcile', () => {
     repository.logs = [{ key: '2026-10-16_med-a_slot-am', dateKey: '2026-10-16', medicationId: 'med-a', slotId: 'slot-am', status: 'taken', loggedAt: '07:30' }];
     await engine.reconcile();
     expect(scheduler.scheduled.has('cx.dose.2026-10-16.0800')).toBe(false);
+  });
+
+  it('does not re-arm cx.dose while a pending cx.snooze lists that doseKey', async () => {
+    const { engine, scheduler } = setup();
+    const doseKey = buildDoseKey('2026-10-16', 'med-a', 'slot-am');
+    scheduler.scheduled.set(`${SNOOZE_NAMESPACE}2026-10-16.0815`, {
+      id: `${SNOOZE_NAMESPACE}2026-10-16.0815`,
+      fireAtMs: Date.UTC(2026, 9, 16, 8, 15),
+      contentHash: null,
+      exact: true,
+      doseKeys: [doseKey],
+    });
+    await engine.reconcile();
+    expect(scheduler.scheduled.has('cx.dose.2026-10-16.0800')).toBe(false);
+    expect(scheduler.scheduled.has(`${SNOOZE_NAMESPACE}2026-10-16.0815`)).toBe(true);
   });
 
   it('never touches foreign namespaces', async () => {
