@@ -1,5 +1,5 @@
 import { Link } from "expo-router";
-import { Bell, CloudOff } from "lucide-react-native";
+import { Bell, CalendarSync, CloudOff } from "lucide-react-native";
 import { Pressable, Text, View } from "react-native";
 
 import { cadenceTokens } from "@/constants/theme";
@@ -27,14 +27,27 @@ export function TabHeaderTitle() {
   );
 }
 
-/** Shared tab header actions: the quick "+ Add" link, plus the reminder settings bell on Regimen (COR-76). */
-export function TabHeaderActions({ showReminderSettings = false }: { showReminderSettings?: boolean }) {
+/** Shared tab header actions: the quick "+ Add" link, the reminder bell on Regimen (COR-76) and the calendar button on Cabinet (COR-79). */
+export function TabHeaderActions({ showReminderSettings = false, showCalendarSync = false }: { showReminderSettings?: boolean; showCalendarSync?: boolean }) {
   return (
     <View className="mr-4 flex-row items-center">
       {showReminderSettings ? (
         <Link href="/reminder-settings" asChild>
           <Pressable accessibilityRole="button" accessibilityLabel="Reminder settings" hitSlop={8} className="mr-3 p-1">
             <Bell color={cadenceTokens.ink} size={20} />
+          </Pressable>
+        </Link>
+      ) : null}
+      {showCalendarSync ? (
+        <Link href="/calendar-sync" asChild>
+          <Pressable
+            testID="cabinet-calendar-sync"
+            accessibilityRole="button"
+            accessibilityLabel="Calendar sync"
+            hitSlop={8}
+            className="mr-3 p-1"
+          >
+            <CalendarSync color={cadenceTokens.ink} size={20} />
           </Pressable>
         </Link>
       ) : null}

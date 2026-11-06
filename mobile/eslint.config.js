@@ -8,9 +8,9 @@ module.exports = defineConfig([
     ignores: ['dist/*', 'coverage/*', '.expo/*', 'node_modules/*'],
   },
   {
-    // COR-76: only the reminder engine talks to the OS notification APIs.
+    // COR-76/COR-79: only the reminder engine talks to expo-notifications, only lib/calendar to expo-auth-session.
     files: ['**/*.{js,jsx,ts,tsx}'],
-    ignores: ['lib/notifications/**'],
+    ignores: ['lib/notifications/**', 'lib/calendar/**'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -19,6 +19,10 @@ module.exports = defineConfig([
             {
               name: 'expo-notifications',
               message: 'Use @/lib/notifications (ensureReminderPermission / useReminderStatus); never schedule from screens.',
+            },
+            {
+              name: 'expo-auth-session',
+              message: 'Use @/lib/calendar (connectCalendar); the Google OAuth flow is internal to lib/calendar.',
             },
           ],
           patterns: [
@@ -46,6 +50,10 @@ module.exports = defineConfig([
             {
               name: 'expo-notifications',
               message: 'Use @/lib/notifications (ensureReminderPermission / useReminderStatus); never schedule from screens.',
+            },
+            {
+              name: 'expo-auth-session',
+              message: 'Use @/lib/calendar (connectCalendar); the Google OAuth flow is internal to lib/calendar.',
             },
           ],
           patterns: [
