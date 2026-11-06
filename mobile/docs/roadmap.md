@@ -86,7 +86,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
 | COR-92 | Set up ESLint so `expo lint` runs | 1 | **Done** | Implemented by PR #8 |
-| COR-94 | Recalculate or flag `nextFillDate` when schedule/inventory is edited | 2 | Backlog | Uses `lib/schedule/supply.ts` |
+| COR-94 | Recalculate or flag `nextFillDate` when schedule/inventory is edited | 2 | In review | Uses `lib/schedule/supply.ts`; `calendarSyncedFillDate` is sealed in `enc_payload` |
 
 Only dependencies seen in Linear are listed; other issues may have relations
 that are not recorded here.
@@ -134,7 +134,8 @@ that are not recorded here.
    `cx.dose.*`) and COR-99 (sentinel / window-end still get the dose action
    category). `expo-notifications` and the local `exact-alarm` module are
    native, so the checklist needs the same development build as item 1.
-5. **COR-94** — pure functions, no device. Land it before COR-79 (calendar sync).
+5. ~~**COR-94**~~ — in review: pure functions, no device. It lands the fill-date
+   refresh and staleness marker before COR-79 (calendar sync).
 
 ## Known gaps and sharp edges
 
@@ -148,7 +149,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 4 | ~~Undo restores the slot's current dose~~ **Fixed** | `taken` logs now record `unitsTaken` in the encrypted payload and undo / un-take refunds that amount; legacy logs fall back to the slot's current dose (or 1). The clamp-at-0 drift (storage.md) still applies | [storage.md](storage.md#behaviours-worth-knowing) | COR-96 (Done) |
 | 5 | `logDose` doesn't validate ids | An unknown medication id writes an orphan log row without error; an unknown slot id assumes 1 unit | [storage.md](storage.md#behaviours-worth-knowing) | Untracked |
 | 6 | ~~Edit saves a snapshot of `currentUnits`~~ **Fixed** | The editor now saves with `inventoryBaseline`; the repository re-reads stock under the write gate and applies only the user's change, so doses logged while the editor is open survive | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-95 (Done) |
-| 7 | `nextFillDate` / calendar event not recomputed on edit | Stored fill date can be wrong after schedule or stock edits | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-94 |
+| 7 | ~~`nextFillDate` / calendar event not recomputed on edit~~ **Fixed** | Supply-edit boundaries now refresh `nextFillDate` from `lib/schedule/supply.ts`; a sealed `calendarSyncedFillDate` marker lets the calendar-sync ticket flag linked events without network code here | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | COR-94 |
 | 8 | ~~No notification hook~~ **Handled** | Every repository mutation (including `deleteMedication`, dose logs and preferences) emits a post-commit change event; the reminder engine reschedules from it | [notifications.md](notifications.md) | COR-76 |
 | 9 | Migration runner is a single step | There is no per-version logic, and the audit-row text is hard-coded to v1. Adding a v2 needs the ordered-step structure first (not needed for payload-only fields) | [storage.md](storage.md#schema-versions-and-migrations) | Untracked (becomes necessary with the first column change) |
 | 10 | No delete / pause UI | `deleteMedication` and `toggleActiveMedication` exist but no screen calls them | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |

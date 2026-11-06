@@ -42,7 +42,7 @@ Because `expo-sqlite` does not bundle SQLCipher whole-file encryption in Expo Go
 
 | Table | Structural Columns (Plaintext) | `enc_payload` (AES-256-GCM Sealed JSON) |
 |---|---|---|
-| `medications` | `id, frequency, start_date, end_date, days_of_week, interval_days, active, inventory_current, inventory_capacity, inventory_low_threshold, inventory_last_refilled, inventory_next_fill_date, inventory_calendar_event_id, created_at, updated_at` | `{ name, generic_name, strength, form, purpose, instructions, prescriber, inventory_pharmacy_note, appearance }` |
+| `medications` | `id, frequency, start_date, end_date, days_of_week, interval_days, active, inventory_current, inventory_capacity, inventory_low_threshold, inventory_last_refilled, inventory_next_fill_date, inventory_calendar_event_id, created_at, updated_at` | `{ name, generic_name, strength, form, purpose, instructions, prescriber, inventory_pharmacy_note, appearance, alert, calendar_synced_fill_date }` |
 | `time_slots` | `id, medication_id, time, dose_units, reminder_enabled, lead_minutes, created_at, updated_at` | `{ label }` |
 | `dose_logs` | `id, date_key, medication_id, slot_id, status, logged_at, created_at, updated_at` | `{ note, unitsTaken, slotSnapshot }` |
 | `user_preferences` | `id, pref_key, updated_at` | `{ value }` |

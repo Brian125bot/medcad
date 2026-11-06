@@ -38,6 +38,9 @@ notification engine consume it; none of them should re-implement any of this.
 | `estimateDaysOfSupplyRemaining(med, todayKey)` | `supply.ts` | Days until stock can't cover the next scheduled day. |
 | `computeRecommendedNextFillDate(med, todayKey)` | `supply.ts` | Two days before depletion (or today). |
 | `getScheduledDayUnits(med, dateKey)` | `supply.ts` | Total dose units scheduled that day. |
+| `recommendedFillDate(med, todayKey)` | `fill-date.ts` | Recommended fill date, or `undefined` for inactive / no-consumption medications. |
+| `refreshNextFillDate({ previous, next, todayKey })` | `fill-date.ts` | Returns `next` with `inventory.nextFillDate` refreshed only when the supply projection changed. |
+| `isCalendarEventStale(inventory)` | `fill-date.ts` | True when a linked calendar event's `calendarSyncedFillDate` no longer matches `nextFillDate`. |
 | `MAX_STREAK_LOOKBACK_DAYS` (3660), `MAX_PROJECTION_DAYS` (36500), `NO_CONSUMPTION_DAYS` (999) | | Bounds and sentinel. |
 
 ## Rules
@@ -104,6 +107,17 @@ reports **100**.
 
 `computeRecommendedNextFillDate` = today + `max(0, daysLeft − 2)`.
 
+### Fill-date refresh (`fill-date.ts`)
+
+`refreshNextFillDate` treats the stored `nextFillDate` as derived data fixed at
+the last supply-affecting save. It compares `recommendedFillDate(previous)` and
+`recommendedFillDate(next)` at the same `todayKey`; if they match, the stored
+date is left alone even if it has drifted. Dose times do not affect supply —
+the projection sums `doseUnits` per scheduled day — so reminder-only edits are
+no-ops. Pause clears the key; resume recomputes it. `isCalendarEventStale` is a
+pure predicate over `googleCalendarEventId`, `nextFillDate`, and the sealed
+`calendarSyncedFillDate` marker; it performs no calendar or network work.
+
 Callers deciding on refills should skip inactive medications explicitly; an
 inactive medication reports the 999 sentinel, which is *not* "plenty of supply".
 
@@ -137,6 +151,7 @@ function / statement coverage required** on `lib/schedule/**` (and
 | `schedule-parity.spec.ts` | Asserts the ported API reproduces those outputs, except the documented divergences above. Also imports the web module. |
 | `schedule-date-keys.spec.ts` | Every branch of the date utilities, leap years, DST days. |
 | `schedule-frequency.spec.ts`, `-doses.spec.ts`, `-supply.spec.ts`, `-analytics.spec.ts` | Unit tests per module (analytics includes 46/47/90/400-day streak-depth cases). |
+| `schedule-fill-date.spec.ts`, `fill-date-boundary.spec.ts` | Fill-date refresh, calendar-staleness predicate, DST civil-date cases, and the guard against legacy supply helpers. |
 
 `npm run test:tz` re-runs the whole vitest suite in six time zones (UTC,
 America/Chicago, America/New_York, Pacific/Auckland, Asia/Kolkata,

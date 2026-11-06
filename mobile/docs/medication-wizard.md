@@ -92,23 +92,27 @@ one message: *"Dose must be a number greater than 0, e.g. 1 or 0.5."*
 
 ## Mapping: form ⇄ `Medication`
 
-`formToMedication(state, { newId, existing? })`
+`formToMedication(state, { newId, existing?, todayKey })`
 
 - Re-validates everything and **throws `MedicationFormInvalidError`** (field
-  names only, no values) instead of producing a corrupt record.
+  names only, no values) instead of producing a corrupt record. `todayKey`
+  must be a valid civil `YYYY-MM-DD` key; an invalid one throws `RangeError`
+  before any medication is built.
 - Trims text; drops blank optional fields; dedupes + sorts `daysOfWeek`; sorts
   slots by time; derives slot labels; copies `appearance`.
 - **IDs:** `newId` is injected (the screens pass `expo-crypto`'s `randomUUID`).
   A new medication and any slot without an `id` get a fresh UUID. IDs are never
   derived from the drug name.
 
-When **editing** (`existing` passed), the wizard owns only what it shows; these
-are **carried over untouched** from the stored medication:
-
+When **editing** (`existing` passed), non-wizard fields are carried over:
 `id`, `purpose`, `instructions`, `prescriber`, `active`,
-`inventory.nextFillDate`, `inventory.googleCalendarEventId`, and the `id` of
-every slot that still exists. New medications get `purpose: ''`,
-`instructions: ''`, `active: true`.
+`inventory.googleCalendarEventId`, `inventory.calendarSyncedFillDate`, and the
+`id` of every slot that still exists. `inventory.nextFillDate` is treated as
+derived data: `formToMedication` runs `refreshNextFillDate` at the caller's
+`todayKey`, comparing the previous and next supply projections. Supply-affecting
+edits move the date, non-supply edits leave the stored value alone, new
+medications get a computed date, and inactive or no-consumption medications get
+none. New medications get `purpose: ''`, `instructions: ''`, `active: true`.
 
 `medicationToForm(med, todayKey)` repairs bad stored data so the user must
 re-confirm it: an unknown `form` becomes unselected, and an invalid `startDate`
@@ -130,8 +134,12 @@ These are current behaviours, not endorsements — several are tracked in the
   `slotSnapshot` (time, label, dose) so Insights/analytics still count it, while
   Today no longer shows the slot. Logs dated after today are removed (COR-93,
   see [storage.md](storage.md#behaviours-worth-knowing)).
-- **`nextFillDate` is not recalculated** when schedule or inventory change
-  (COR-94).
+- **`nextFillDate` is refreshed at supply-edit boundaries (COR-94).** Wizard
+  saves, `refillMedication`, and `toggleActiveMedication` recompute it from
+  `lib/schedule/supply.ts` when the edit changes the projection; dose logging
+  does not. If a Google Calendar event is linked, `calendarSyncedFillDate`
+  records the date that event last reflected, so `isCalendarEventStale` can
+  flag the event for the calendar-sync ticket without any network call here.
 - **Reminders.** Saving emits a repository change event and the COR-76
   reminder engine reschedules; the wizard only asks for notification
   permission (on save with reminders on, or when a reminder switch is turned
