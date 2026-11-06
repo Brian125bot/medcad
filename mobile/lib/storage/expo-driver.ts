@@ -1,83 +1,102 @@
 import * as SQLite from 'expo-sqlite';
-import type { SqlDriver, SqlValue } from './ports';
+import type { SqlDriver, SqlOperations, SqlValue } from './ports';
 import { DATABASE_NAME } from './schema';
 
 /**
- * expo-sqlite implementation of SqlDriver.
- *
- * Single-writer discipline: expo-sqlite serializes transactions per connection,
- * but individual async statements outside a transaction can still interleave.
- * The repository therefore funnels every read-modify-write through runExclusive,
- * which chains on a promise mutex. Transactions use withExclusiveTransactionAsync
- * (fails loudly with "database is locked" on contention rather than silently
- * interleaving, per the SDK 57 docs).
- *
- * withExclusiveTransactionAsync runs on its own connection: only statements sent
- * through its `txn` are inside BEGIN/ROLLBACK. While a transaction is open every
- * driver statement is routed to that `txn` (nested calls join it); routing them to
- * the main handle would auto-commit each one and make rollback a no-op.
+ * expo-sqlite implementation of SqlDriver. All work on this handle shares one
+ * FIFO gate. Transaction and runExclusive callbacks receive scoped operations,
+ * so their statements can use the held connection without exposing that scope
+ * to unrelated calls made through the root driver.
  */
 /** `databaseName` defaults to the app database; the COR-88 benchmark passes its own isolated file. */
 export function expoSqlDriver(databaseName: string = DATABASE_NAME): SqlDriver {
-  let db: SQLite.SQLiteDatabase | null = null;
+  let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
   let gate: Promise<unknown> = Promise.resolve();
-  let txn: SQLite.SQLiteDatabase | null = null;
 
-  async function getDb(): Promise<SQLite.SQLiteDatabase> {
-    if (!db) db = await SQLite.openDatabaseAsync(databaseName);
-    return db;
+  async function withGate<T>(work: () => Promise<T>): Promise<T> {
+    const run = gate.then(work, work);
+    gate = run.then(() => undefined, () => undefined);
+    return run;
   }
 
-  async function conn(): Promise<SQLite.SQLiteDatabase> {
-    return txn ?? getDb();
+  async function getDb(): Promise<SQLite.SQLiteDatabase> {
+    if (!dbPromise) {
+      const opening = SQLite.openDatabaseAsync(databaseName);
+      dbPromise = opening;
+      try {
+        return await opening;
+      } catch (error) {
+        if (dbPromise === opening) dbPromise = null;
+        throw error;
+      }
+    }
+    return dbPromise;
   }
 
   function toParams(params: readonly SqlValue[] | undefined): SQLite.SQLiteBindParams {
     return (params ?? []) as SQLite.SQLiteBindParams;
   }
 
+  function scopedOperations(
+    resolveConnection: () => Promise<SQLite.SQLiteDatabase>,
+    lockHeld: boolean,
+    transactionActive: boolean,
+  ): SqlOperations {
+    const runOnConnection = <T>(operation: (connection: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> => {
+      const work = async () => operation(await resolveConnection());
+      return lockHeld ? work() : withGate(work);
+    };
+
+    const operations: SqlOperations = {
+      async exec(sql) {
+        await runOnConnection((connection) => connection.execAsync(sql));
+      },
+      async run(sql, params) {
+        await runOnConnection((connection) => connection.runAsync(sql, toParams(params)));
+      },
+      all<T>(sql: string, params?: readonly SqlValue[]) {
+        return runOnConnection((connection) => connection.getAllAsync<T>(sql, toParams(params)));
+      },
+      get<T>(sql: string, params?: readonly SqlValue[]) {
+        return runOnConnection((connection) => connection.getFirstAsync<T>(sql, toParams(params)));
+      },
+      async transaction<T>(fn: (driver: SqlOperations) => Promise<T>) {
+        if (transactionActive) return fn(operations);
+        const work = async () => {
+          const handle = await getDb();
+          let result!: T;
+          await handle.withExclusiveTransactionAsync(async (transaction) => {
+            const transactionOperations = scopedOperations(async () => transaction, true, true);
+            result = await fn(transactionOperations);
+          });
+          return result;
+        };
+        return lockHeld ? work() : withGate(work);
+      },
+      runExclusive<T>(fn: (driver: SqlOperations) => Promise<T>) {
+        if (lockHeld) return fn(operations);
+        return withGate(async () => fn(scopedOperations(getDb, true, false)));
+      },
+    };
+    return operations;
+  }
+
   return {
+    ...scopedOperations(getDb, false, false),
     async open() {
-      const handle = await getDb();
-      await handle.execAsync('PRAGMA journal_mode = WAL;');
-      await handle.execAsync('PRAGMA foreign_keys = ON;');
-    },
-    async exec(sql) {
-      await (await conn()).execAsync(sql);
-    },
-    async run(sql: string, params?: readonly SqlValue[]) {
-      await (await conn()).runAsync(sql, toParams(params));
-    },
-    async all<T>(sql: string, params?: readonly SqlValue[]) {
-      return (await conn()).getAllAsync<T>(sql, toParams(params));
-    },
-    async get<T>(sql: string, params?: readonly SqlValue[]) {
-      return (await conn()).getFirstAsync<T>(sql, toParams(params));
-    },
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
-      if (txn) return fn();
-      const handle = await getDb();
-      let result!: T;
-      await handle.withExclusiveTransactionAsync(async (tx) => {
-        txn = tx;
-        try {
-          result = await fn();
-        } finally {
-          txn = null;
-        }
+      await withGate(async () => {
+        const handle = await getDb();
+        await handle.execAsync('PRAGMA journal_mode = WAL;');
+        await handle.execAsync('PRAGMA foreign_keys = ON;');
       });
-      return result;
-    },
-    async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-      const run = gate.then(fn, fn);
-      gate = run.catch(() => undefined);
-      return run as Promise<T>;
     },
     async close() {
-      if (db) {
-        await db.closeAsync();
-        db = null;
-      }
+      await withGate(async () => {
+        if (!dbPromise) return;
+        const handle = await dbPromise;
+        await handle.closeAsync();
+        dbPromise = null;
+      });
     },
   };
 }

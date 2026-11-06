@@ -1,14 +1,18 @@
 export type SqlValue = string | number | null;
 
-export interface SqlDriver {
-  open(name: string): Promise<void>;
+/** SQL operations bound to one serialized driver scope. */
+export interface SqlOperations {
   exec(sql: string): Promise<void>;
   run(sql: string, params?: readonly SqlValue[]): Promise<void>;
   all<T>(sql: string, params?: readonly SqlValue[]): Promise<T[]>;
   get<T>(sql: string, params?: readonly SqlValue[]): Promise<T | null>;
-  transaction<T>(fn: () => Promise<T>): Promise<T>;
-  /** Execute fn while holding the single-writer gate so async interleaving cannot split a read-modify-write. */
-  runExclusive<T>(fn: () => Promise<T>): Promise<T>;
+  transaction<T>(fn: (driver: SqlOperations) => Promise<T>): Promise<T>;
+  /** Execute fn while holding the same single-writer gate as transactions. */
+  runExclusive<T>(fn: (driver: SqlOperations) => Promise<T>): Promise<T>;
+}
+
+export interface SqlDriver extends SqlOperations {
+  open(name: string): Promise<void>;
   close(): Promise<void>;
 }
 

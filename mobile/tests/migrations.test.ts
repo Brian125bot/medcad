@@ -10,9 +10,9 @@ async function main() {
   {
     const driver = nodeSqlDriver();
     await driver.open(':memory:');
-    await driver.transaction(async () => {
-      for (const stmt of DDL_STATEMENTS) await driver.exec(stmt);
-      await driver.run(
+    await driver.transaction(async (transaction) => {
+      for (const stmt of DDL_STATEMENTS) await transaction.exec(stmt);
+      await transaction.run(
         'CREATE TABLE IF NOT EXISTS __vault_canary__ (id TEXT PRIMARY KEY, sealed TEXT NOT NULL, updated_at TEXT NOT NULL);',
       );
     });
