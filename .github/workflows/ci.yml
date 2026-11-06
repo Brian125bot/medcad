@@ -1,8 +1,9 @@
 # CI for the CadenceRx mobile app (mobile/). Mirrors the local gate in
 # mobile/docs/development.md. No secrets are used.
 #
-# The root Next.js prototype is not a job: on Node 22 its check, lint and test
-# scripts fail, and it has no npm lockfile.
+# The root Next.js prototype is not a job: it is not part of the release path
+# and has no npm lockfile. Its tooling ignores mobile/ (see the root
+# tsconfig.json and eslint.config.mjs); mobile/ is checked by the job below.
 #
 # Actions are pinned to commit SHAs. The release tag is only a comment, so a
 # moved tag cannot change this workflow.
