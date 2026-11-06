@@ -5,7 +5,7 @@ import { Redirect, Stack } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, View } from "react-native";
 
-import { cor88BenchmarkAccessEnabled } from "@/app/cor88-benchmark-access";
+import { cor88BenchmarkAccessEnabled } from "@/constants/cor88-benchmark";
 import { cadenceTokens } from "@/constants/theme";
 import { toDateKey } from "@/lib/schedule/date-keys";
 import {

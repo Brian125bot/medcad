@@ -14,6 +14,13 @@ export const FILE_SCAN_CHUNK_BYTES = 65_536;
 
 const textEncoder = new TextEncoder();
 
+/** Turn a native filesystem path into a URI `expo-file-system` accepts on Android. */
+export function toFileUri(path: string): string {
+  if (path.startsWith('file://') || path.startsWith('content://')) return path;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return path;
+  return path.startsWith('/') ? `file://${path}` : `file:///${path}`;
+}
+
 export function basenameOnly(path: string): string {
   const normalized = path.replace(/\\/g, '/');
   const slash = normalized.lastIndexOf('/');

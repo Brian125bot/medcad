@@ -7,9 +7,22 @@ import {
   formatDatabaseFileSizes,
   isBenchmarkDatabaseFile,
   scanFileBytesForSentinels,
+  toFileUri,
 } from '../lib/storage/database-file-scan';
 
 const encoder = new TextEncoder();
+
+describe('toFileUri', () => {
+  it('prefixes file:// for plain absolute paths and leaves URIs unchanged', () => {
+    expect(toFileUri('/data/user/0/pkg/files/SQLite/cadencerx-benchmark.db')).toBe(
+      'file:///data/user/0/pkg/files/SQLite/cadencerx-benchmark.db',
+    );
+    expect(toFileUri('file:///already')).toBe('file:///already');
+    expect(toFileUri('content://authority/path')).toBe('content://authority/path');
+    expect(toFileUri('relative/path.db')).toBe('file:///relative/path.db');
+    expect(toFileUri('https://example.com/x')).toBe('https://example.com/x');
+  });
+});
 
 describe('isBenchmarkDatabaseFile', () => {
   it('matches basename only', () => {

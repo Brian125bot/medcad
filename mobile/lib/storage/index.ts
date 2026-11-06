@@ -3,7 +3,7 @@
 import { File } from 'expo-file-system';
 import { deleteDatabaseAsync, openDatabaseAsync } from 'expo-sqlite';
 import { createStorageContext, VAULT_KEY_ID, type StorageContext } from './context';
-import { basenameOnly, isBenchmarkDatabaseFile, type DatabaseFileBytes } from './database-file-scan';
+import { basenameOnly, isBenchmarkDatabaseFile, toFileUri, type DatabaseFileBytes } from './database-file-scan';
 import type { BenchmarkEnvironment } from './device-benchmark';
 import type { StoragePlatform } from './context';
 import { collectStorageDiagnostics, runKeyLossRecoveryCheck, type KeyLossRecoveryResult, type StorageDiagnostics } from './diagnostics';
@@ -49,7 +49,7 @@ async function readSidecarBytes(dbPath: string, suffix: '' | '-wal' | '-shm'): P
   const path = suffix ? `${dbPath}${suffix}` : dbPath;
   const name = suffix ? `${basenameOnly(dbPath)}${suffix}` : basenameOnly(dbPath);
   try {
-    const file = new File(path);
+    const file = new File(toFileUri(path));
     const buffer = await file.arrayBuffer();
     return { name, bytes: new Uint8Array(buffer) };
   } catch {

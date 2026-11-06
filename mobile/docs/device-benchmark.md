@@ -114,7 +114,8 @@ issues `PRAGMA key`.
   error class name only.
 - The screen and Theme tab redirect to Today in production unless
   `EXPO_PUBLIC_COR88_BENCHMARK=1` was set when the JS bundle was built (read
-  only in `app/cor88-benchmark-access.ts` so Metro inlines it). Never commit that
+  in `constants/cor88-benchmark.ts` so Metro inlines it and Expo Router does not
+  expose a route). Never commit that
   flag in `.env` or production EAS profiles.
 
 ## Telemetry

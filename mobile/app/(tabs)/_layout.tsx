@@ -4,7 +4,7 @@ import { CalendarDays, type LucideIcon, Package, Palette, Pill, TrendingUp } fro
 import { TabHeaderActions, TabHeaderTitle } from "@/components/tab-header/TabHeader";
 import { cadenceTokens } from "@/constants/theme";
 import { useTodayPendingCount } from "@/hooks/useTodaySchedule";
-import { cor88BenchmarkAccessEnabled } from "@/app/cor88-benchmark-access";
+import { cor88BenchmarkAccessEnabled } from "@/constants/cor88-benchmark";
 import {
   INITIAL_TAB,
   PRIMARY_TABS,

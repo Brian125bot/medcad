@@ -2,7 +2,7 @@ import { Link, Redirect } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { Info } from "lucide-react-native";
 
-import { cor88BenchmarkAccessEnabled } from "@/app/cor88-benchmark-access";
+import { cor88BenchmarkAccessEnabled } from "@/constants/cor88-benchmark";
 
 /**
  * Theme reference screen (COR-70 scaffold).
