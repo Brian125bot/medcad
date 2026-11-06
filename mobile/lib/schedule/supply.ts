@@ -34,6 +34,9 @@ import { isMedicationScheduledOnDate } from './frequency';
 /** Sentinel meaning "no scheduled consumption" (parity with the web 999). */
 export const NO_CONSUMPTION_DAYS = 999;
 
+/** Upper bound for a single refill (units). Shared by storage validation and the Cabinet input. */
+export const MAX_REFILL_UNITS = 10_000;
+
 /** Forward-projection termination guard (100 years of calendar days). */
 export const MAX_PROJECTION_DAYS = 36500;
 

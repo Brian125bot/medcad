@@ -93,8 +93,54 @@ async function main() {
   assert.strictEqual(await repository.getPreference('theme', 'system'), 'dark');
 
   assert.strictEqual((await repository.toggleActiveMedication('med-1'))?.active, false);
-  assert.strictEqual((await repository.refillMedication('med-1', 5, 'CVS'))?.inventory.currentUnits, 15);
-  assert.strictEqual((await repository.refillMedication('med-1', 5, 'CVS'))?.inventory.pharmacyNote, 'CVS');
+  assert.strictEqual((await repository.refillMedication('med-1', 5, '2026-10-15', 'CVS'))?.inventory.currentUnits, 15);
+  assert.strictEqual((await repository.refillMedication('med-1', 5, '2026-10-15', 'CVS'))?.inventory.pharmacyNote, 'CVS');
+
+  // COR-78 P1: civil-dated, validated, lost-update-safe refills.
+  {
+    const refillEvents: string[] = [];
+    const off = repository.subscribe((change) => {
+      if (change.type === 'medication-saved') refillEvents.push(change.medicationId);
+    });
+    // Baseline stock before this block: 15 + 5 = 20 after the two refills above.
+    const before = (await repository.getMedicationById('med-1'))!;
+    assert.strictEqual(before.inventory.currentUnits, 20);
+
+    // lastRefilledAt is the caller's civil key, not a UTC slice.
+    const refilled = (await repository.refillMedication('med-1', 3, '2026-10-16'))!;
+    assert.strictEqual(refilled.inventory.lastRefilledAt, '2026-10-16');
+    assert.strictEqual(refilled.inventory.currentUnits, 23);
+    assert.strictEqual(refillEvents.filter((id) => id === 'med-1').length, 1, 'exactly one medication-saved per refill');
+
+    // Validation rejects before any write.
+    const stockAfterValid = (await repository.getMedicationById('med-1'))!.inventory.currentUnits;
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 10_001]) {
+      await assert.rejects(() => repository.refillMedication('med-1', bad, '2026-10-16'), RangeError);
+    }
+    await assert.rejects(() => repository.refillMedication('med-1', 1, '2026-13-01'), RangeError);
+    assert.strictEqual((await repository.getMedicationById('med-1'))!.inventory.currentUnits, stockAfterValid);
+    assert.strictEqual(refillEvents.filter((id) => id === 'med-1').length, 1, 'validation writes nothing');
+
+    // A dose logged between the refill's read and its save survives (start + refill - dose).
+    const interleave = (await repository.getMedicationById('med-1'))!;
+    assert.strictEqual(interleave.inventory.currentUnits, 23);
+    const originalRead = repository.getMedicationById.bind(repository);
+    let injected = false;
+    repository.getMedicationById = async (id: string, driver?: Parameters<typeof repository.getMedicationById>[1]) => {
+      const med = await originalRead(id, driver as never);
+      if (!injected && id === 'med-1') {
+        injected = true;
+        // slot-a doseUnits = 2; 23 -> 21, then refill +4 -> 25 (not 27).
+        await repository.logDose('2026-10-16', 'med-1', 'slot-a', 'taken');
+      }
+      return med;
+    };
+    const raced = (await repository.refillMedication('med-1', 4, '2026-10-16'))!;
+    repository.getMedicationById = originalRead;
+    assert.strictEqual(raced.inventory.currentUnits, 25, 'concurrent dose preserved: 23 + 4 - 2');
+    assert.strictEqual((await repository.getMedicationById('med-1'))!.inventory.currentUnits, 25);
+    off();
+  }
 
   const info = await repository.getStorageEngineInfo();
   assert.strictEqual(info.engine, 'SQLite (Encrypted)');

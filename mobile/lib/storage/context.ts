@@ -2,7 +2,9 @@ import type { CipherPort, SecureKeyStore, SqlDriver, SqlOperations } from './por
 import type { MedicationRow, TimeSlotRow, DoseLogRow, UserPreferenceRow, SchemaVersionRecord } from './schema';
 import { CURRENT_DATABASE_SCHEMA_VERSION, DATABASE_NAME, DDL_STATEMENTS } from './schema';
 import type { DoseSlotSnapshot, TimeSlot } from '../domain/medication-data';
-import { isDoseSlotSnapshot, toDateKey, toDoseSlotSnapshot } from '../domain/medication-data';
+import { isDoseSlotSnapshot, toDoseSlotSnapshot } from '../domain/medication-data';
+import { isValidDateKey, toDateKey } from '../schedule/date-keys';
+import { MAX_REFILL_UNITS } from '../schedule/supply';
 
 export const VAULT_KEY_ID = 'cadencerx.vault.key.v1';
 export const VAULT_KEYSTORE_SERVICE = 'app.cadencerx.vault';
@@ -746,15 +748,27 @@ export class MedicationRepository {
     return medication;
   }
 
-  public async refillMedication(id: string, unitsToAdd: number, notes?: string) {
+  /**
+   * Adds `unitsToAdd` to stock and stamps `lastRefilledAt` with the caller's
+   * civil `todayKey` (never a UTC slice). Uses COR-95's `inventoryBaseline` so a
+   * dose logged between the read and the save is preserved. `nextFillDate` and
+   * `googleCalendarEventId` are left untouched (COR-94 owns them).
+   */
+  public async refillMedication(id: string, unitsToAdd: number, todayKey: string, notes?: string) {
+    if (!Number.isFinite(unitsToAdd) || unitsToAdd <= 0 || unitsToAdd > MAX_REFILL_UNITS) {
+      throw new RangeError(`Refill units must be a finite number greater than 0 and at most ${MAX_REFILL_UNITS}`);
+    }
+    if (!isValidDateKey(todayKey)) {
+      throw new RangeError(`Invalid refill date key: ${todayKey}`);
+    }
     await this.ensureReady();
     const medication = await this.getMedicationById(id);
     if (!medication) return null;
-    medication.inventory.currentUnits += unitsToAdd;
-    medication.inventory.lastRefilledAt = new Date().toISOString().slice(0, 10);
+    const baseline = medication.inventory.currentUnits;
+    medication.inventory.currentUnits = baseline + unitsToAdd;
+    medication.inventory.lastRefilledAt = todayKey;
     if (notes !== undefined) medication.inventory.pharmacyNote = notes;
-    await this.saveMedication(medication);
-    return medication;
+    return this.saveMedication(medication, { inventoryBaseline: baseline });
   }
 
   public async bulkSaveMedications(meds: import('../domain/medication-data').Medication[]): Promise<void> {
@@ -1315,7 +1329,7 @@ export async function createStorageContext(platform: StoragePlatform): Promise<S
         .get<UserPreferenceRow>('SELECT * FROM user_preferences WHERE pref_key = ?', ['__seeded_demo__'])
         .catch(() => null);
       if (seededFlag) return;
-      await seedDemoVault(repository, options?.seedTodayKey || new Date().toISOString().slice(0, 10));
+      await seedDemoVault(repository, options?.seedTodayKey || toDateKey(new Date()));
       await repository.setPreference('__seeded_demo__', true);
     },
   };
@@ -1327,7 +1341,7 @@ export async function seedDemoVault(
   seedTodayKey?: string,
 ): Promise<void> {
   const { createInitialSeedData } = await import('../domain/medication-data');
-  const seed = createInitialSeedData(seedTodayKey || new Date().toISOString().slice(0, 10));
+  const seed = createInitialSeedData(seedTodayKey || toDateKey(new Date()));
   // Strip drug names from storage IDs (they would otherwise sit in plaintext PKs).
   // Inventory is stored EXACTLY as the seed defines it — history logs are written
   // via logDoseAt, which never touches inventory, so showing history can't drain stock.

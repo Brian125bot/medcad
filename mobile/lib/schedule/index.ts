@@ -63,6 +63,7 @@ export {
   estimateDaysOfSupplyRemaining,
   getScheduledDayUnits,
   MAX_PROJECTION_DAYS,
+  MAX_REFILL_UNITS,
   NO_CONSUMPTION_DAYS,
 } from './supply';
 export { computeAdherenceAnalytics, MAX_STREAK_LOOKBACK_DAYS } from './analytics';
