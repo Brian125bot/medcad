@@ -5,9 +5,11 @@ import { Redirect, Stack } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, View } from "react-native";
 
+import { cor88BenchmarkAccessEnabled } from "@/constants/cor88-benchmark";
 import { cadenceTokens } from "@/constants/theme";
 import { toDateKey } from "@/lib/schedule/date-keys";
 import {
+  describeBuild,
   ENCRYPTION_BACKEND,
   reportToJson,
   reportToMarkdown,
@@ -21,12 +23,10 @@ import { createBenchmarkEnvironment, getAppStorageDiagnostics, runBenchmarkVault
 import { diagnosticsToText, recoveryToText } from "@/lib/storage/diagnostics";
 
 /**
- * COR-88 hardware storage benchmark (development builds only).
- * Runs against an isolated benchmark database + keychain entry, never the
- * user's vault. Results contain timings and pass/fail flags only.
- * Entry: the dev-only Theme tab → "Storage benchmark".
+ * COR-88 hardware storage benchmark (dev builds, or release with
+ * `EXPO_PUBLIC_COR88_BENCHMARK=1` at build time).
  */
-function readTelemetry(): DeviceTelemetry {
+function readTelemetry(benchmarkFlag: boolean): DeviceTelemetry {
   return {
     platform: Platform.OS,
     deviceModel: Device.modelName,
@@ -36,6 +36,8 @@ function readTelemetry(): DeviceTelemetry {
     architecture: Device.supportedCpuArchitectures?.join(", ") ?? null,
     isPhysicalDevice: Device.isDevice,
     appVersion: Constants.expoConfig?.version ?? null,
+    buildMode: __DEV__ ? "debug" : "release",
+    benchmarkFlag,
   };
 }
 
@@ -55,9 +57,11 @@ export default function BenchmarkScreen() {
   const [diagBusy, setDiagBusy] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
 
-  if (!__DEV__) return <Redirect href="/today" />;
+  const benchmarkAccess = cor88BenchmarkAccessEnabled(__DEV__);
+  if (!benchmarkAccess) return <Redirect href="/today" />;
 
-  const telemetry = readTelemetry();
+  const benchmarkFlag = !__DEV__ && benchmarkAccess;
+  const telemetry = readTelemetry(benchmarkFlag);
 
   async function run() {
     setRunning(true);
@@ -84,7 +88,7 @@ export default function BenchmarkScreen() {
     setDiagCopied(false);
     try {
       // Real vault: read-only. Recovery check: isolated benchmark vault only.
-      const app = diagnosticsToText(await getAppStorageDiagnostics(), "app vault (read-only)");
+      const app = diagnosticsToText(await getAppStorageDiagnostics(), "app vault (read-only)", telemetry);
       const recovery = recoveryToText(await runBenchmarkVaultRecoveryCheck(toDateKey(new Date())));
       setDiagText(`${app}\n\n${recovery}`);
     } catch (cause) {
@@ -115,6 +119,7 @@ export default function BenchmarkScreen() {
           <Row label="Physical device" value={telemetry.isPhysicalDevice ? "yes" : "no — simulator results are not COR-88 evidence"} />
           <Row label="OS" value={`${telemetry.osName ?? "?"} ${telemetry.osVersion ?? ""}`} />
           <Row label="Arch" value={telemetry.architecture ?? "unknown"} />
+          <Row label="Build" value={describeBuild(telemetry.buildMode, telemetry.benchmarkFlag)} />
           <Row label="Encryption" value={`${ENCRYPTION_BACKEND.cipher} field-level, key in SecureStore (not SQLCipher)`} />
         </View>
 
@@ -157,10 +162,12 @@ export default function BenchmarkScreen() {
               </View>
             ))}
             <Text className="mt-3 text-xs text-slate-600">
-              COR-71 single write p50/p95: {report.legacy.writeP50Ms.toFixed(2)} / {report.legacy.writeP95Ms.toFixed(2)} ms (target {"<"} 15)
+              COR-71 p50/p95 ms ({report.legacy.samples} samples): write {report.legacy.write.p50Ms.toFixed(2)} / {report.legacy.write.p95Ms.toFixed(2)} (target{" "}
+              {"<"} {report.legacy.writeTargetMs}: {report.legacy.writeTargetMet ? "met" : "not met"}) · read {report.legacy.read.p50Ms.toFixed(2)} /{" "}
+              {report.legacy.read.p95Ms.toFixed(2)} · batch {report.legacy.batch.p50Ms.toFixed(2)} / {report.legacy.batch.p95Ms.toFixed(2)}
             </Text>
             <Text className="mt-1 text-xs text-slate-600">
-              Integrity: plaintext {report.integrity.plaintextScan.passed ? "PASS" : "FAIL"} · wrong key{" "}
+              Integrity: table scan {report.integrity.plaintextScan.passed ? "PASS" : "FAIL"} · file scan {report.integrity.fileScan.status} · wrong key{" "}
               {report.integrity.wrongKeyRejected.passed ? "PASS" : "FAIL"} · rollback {report.integrity.atomicRollback.passed ? "PASS" : "FAIL"} · data{" "}
               {report.integrity.dataVerified.passed ? "PASS" : "FAIL"}
             </Text>

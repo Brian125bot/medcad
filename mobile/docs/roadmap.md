@@ -23,7 +23,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-70 | Scaffold Expo project and theme tokens | 3 | Done |
 | COR-71 | Local encrypted SQLite / storage layer | 5 | Done *(performance criterion unverified — see COR-88)* |
 | COR-72 | Port and optimise schedule frequency and streak engine | 3 | Done |
-| COR-88 | Verify COR-71 on a physical device; record a real benchmark | 3 | **In Progress** *(PR #16 merged the benchmark harness only, no device numbers yet; Linear had closed the issue on 2026-10-16 and it was reopened on 2026-11-05)* |
+| COR-88 | Verify COR-71 on a physical device; record a real benchmark | 3 | **In Progress** *(PR #16 merged the benchmark harness only, no device numbers yet; Linear had closed the issue on 2026-10-16 and it was reopened on 2026-11-05. Run sheet: [cor-88-device-run-package.md](cor-88-device-run-package.md))* |
 
 ### M2 — Native UI and dose interaction
 
@@ -97,7 +97,9 @@ that are not recorded here.
     encrypted payload so no migration is needed (old rows simply have no
     `appearance`). Close COR-89 as done, or rewrite it (for example to add a
     list-row `PillPreview`).
-- **COR-88** — device verification of the storage layer, in progress.
+- **COR-88** — device verification of the storage layer, in progress: harness
+  and run sheet ([cor-88-device-run-package.md](cor-88-device-run-package.md))
+  ready, physical iOS + Android run outstanding.
 
 ## Suggested order (from the dependency graph)
 

@@ -43,12 +43,14 @@ the issue id and PR number where there are any.
   `lib/storage/device-benchmark.ts` times cold init, a 10-medication / 500-log
   single-transaction seed, a 365-day range query and a dose → taken update with
   the adherence/streak recompute against PASS / WARN / FAIL gates; checks for
-  plaintext in raw rows, wrong-key rejection via the canary and atomic rollback;
+  plaintext in raw rows and benchmark DB file bytes (main + WAL + SHM), wrong-key
+  rejection via the canary and atomic rollback;
   reports JSON plus a Markdown table (Cold / Avg Warm over 3 warm runs). Uses an
   isolated database file and keychain service. Dev-only screen
   `app/benchmark.tsx` (from the Theme tab) with copy-to-clipboard. Repository
   gains `getDoseLogsInRange()` and `importSnapshot()`; `expoSqlDriver()` takes
-  a database name. New dependencies `expo-device`, `expo-clipboard`. See
+  a database name. Release access via build-time `EXPO_PUBLIC_COR88_BENCHMARK=1`
+  (no source edits). New dependencies `expo-device`, `expo-clipboard`, `expo-file-system`. See
   [`device-benchmark.md`](mobile/docs/device-benchmark.md). *(COR-88)*
 - **[mobile]** COR-88 storage diagnostics on the benchmark screen: read-only
   engine info, key present, canary OK, schema / `user_version` and row counts
@@ -56,8 +58,33 @@ the issue id and PR number where there are any.
   `deleteVault()` recovery check that runs only on the isolated benchmark vault;
   Copy Diagnostics button. The benchmark Markdown now follows the COR-88 report
   template (sign-off left pending review). *(COR-88)*
+- **[mobile]** COR-88 device-run package
+  [`cor-88-device-run-package.md`](mobile/docs/cor-88-device-run-package.md):
+  build commands (including flagged release builds), per-platform protocol,
+  built-in benchmark file scan plus optional app-vault grep, what to paste into
+  Linear and which docs to update. Still no device numbers.
+  *(COR-88)*
+
+### Changed
+- **[mobile]** COR-88 benchmark report (schema `cadencerx.cor88.device-benchmark/v3`):
+  `repository.runBenchmark()` now runs 10× per run (40 samples) and the report
+  gives cold, avg warm, p50, p95 and max for the single write, read and 5-row
+  batch (v1 had read / batch p50 only and p95 over 4 samples); the `< 15 ms`
+  verdict is on single-write p95 in **release** runs. Adds `integrity.fileScan`
+  (`passed` / `failed` / `unavailable`) over benchmark DB bytes. Report and
+  diagnostics carry a **Build** line (`debug` / `release` from `__DEV__`, plus
+  flag when enabled), the report a hand-filled battery / power-mode line, and
+  diagnostics the device line and the full `getStorageEngineInfo()` JSON. *(COR-88)*
 
 ### Fixed
+- **[mobile]** Native storage transactions were not atomic: `withExclusiveTransactionAsync`
+  runs on its own connection, but `expoSqlDriver` sent statements to the main
+  handle, so each auto-committed and rollback did nothing. Statements inside
+  `transaction()` now go through the transaction connection (nested calls join it).
+  Found by the COR-88 emulator smoke test (`atomicRollback` 510 → 1020 rows). *(COR-71, COR-88, #21)*
+- **[mobile]** Android build: notification sound renamed `cadencerx_chime.wav`
+  (Android resource names cannot contain `-`), and `ExactAlarmModule.kt` no longer
+  uses bare `return@Function`, which Kotlin 2 rejects. *(COR-76, #21)*
 - **[mobile]** Dose history survives removing a dose time or deleting a
   medication: every dose log stores a `slotSnapshot` (`time`, `label`,
   `doseUnits`) in its encrypted payload, returned by all dose-log readers.

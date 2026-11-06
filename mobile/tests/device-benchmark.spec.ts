@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   average,
   BENCHMARK_GATES,
+  describeBuild,
+  MICRO_SAMPLES_PER_RUN,
+  microStats,
   buildReport,
   buildSyntheticDataset,
   DATASET_DOSE_LOGS,
@@ -36,6 +39,7 @@ const telemetry: DeviceTelemetry = {
   architecture: 'arm64',
   isPhysicalDevice: true,
   appVersion: '1.0.0',
+  buildMode: 'release',
 };
 
 const dirs: string[] = [];
@@ -170,6 +174,13 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(report.integrity.atomicRollback.rowsAfter).toBe(report.integrity.atomicRollback.rowsBefore);
     expect(report.integrity.dataVerified).toEqual({ passed: true, medications: 10, doseLogs: 500, rangeRows: 500, doseTaken: true });
     expect(report.legacy.runs).toBe(4);
+    expect(report.legacy.samples).toBe(4 * MICRO_SAMPLES_PER_RUN);
+    for (const op of ['write', 'read', 'batch'] as const) {
+      const stats = report.legacy[op];
+      expect(stats.p50Ms).toBeLessThanOrEqual(stats.p95Ms);
+      expect(stats.p95Ms).toBeLessThanOrEqual(stats.maxMs);
+    }
+    expect(report.legacy.writeTargetMet).toBe(report.legacy.write.p95Ms < 15);
     expect(report.overall).toBe('PASS');
     expect(report.generatedAt).toBe('2026-10-16T16:00:00.000Z');
     expect(report.encryption.cipher).toBe('AES-256-GCM');
@@ -181,7 +192,8 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(existsSync(env.file)).toBe(false);
     const json = reportToJson(report);
     expect(json).not.toMatch(/BENCH(NAME|NOTE|STRENGTH|RX|PHARM)/);
-    expect(JSON.parse(json).schema).toBe('cadencerx.cor88.device-benchmark/v1');
+    expect(report.integrity.fileScan.status).toBe('unavailable');
+    expect(JSON.parse(json).schema).toBe('cadencerx.cor88.device-benchmark/v3');
   }, 60_000);
 
   it('uses the real clock by default and honours warmRuns', async () => {
@@ -189,6 +201,8 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(report.warmRuns).toBe(0);
     expect(report.scenarios[0].coldMs).toBeGreaterThan(0);
     expect(report.scenarios[1].avgWarmMs).toBe(0);
+    expect(report.legacy.samples).toBe(MICRO_SAMPLES_PER_RUN);
+    expect(report.legacy.write.avgWarmMs).toBe(0);
     expect(Number.isNaN(Date.parse(report.generatedAt))).toBe(false);
   }, 30_000);
 
@@ -228,25 +242,45 @@ describe('runDeviceBenchmark (node:sqlite, isolated file)', () => {
     expect(closes).toBeGreaterThan(0);
     expect(await env.keystore.getItem(VAULT_KEY_ID)).toBeNull();
   }, 30_000);
+
+  it('fails when raw file bytes contain a sentinel', async () => {
+    const env = nodeEnv();
+    env.readDatabaseFiles = async () => [{ name: 'cadencerx-benchmark.db', bytes: new TextEncoder().encode('BENCHNAME-BENCH01') }];
+    const report = await runDeviceBenchmark(env, telemetry, { todayKey: TODAY, warmRuns: 0 });
+    expect(report.integrity.fileScan.status).toBe('failed');
+    expect(report.overall).toBe('FAIL');
+  }, 30_000);
+
+  it('passes file scan when sidecar bytes are clean', async () => {
+    const env = nodeEnv();
+    env.readDatabaseFiles = async () => [
+      { name: 'cadencerx-benchmark.db', bytes: new Uint8Array([1, 2, 3]) },
+      { name: 'cadencerx-benchmark.db-wal', bytes: new Uint8Array([4]) },
+    ];
+    const report = await runDeviceBenchmark(env, telemetry, { todayKey: TODAY, warmRuns: 0 });
+    expect(report.integrity.fileScan.status).toBe('passed');
+    expect(report.integrity.fileScan.files).toHaveLength(2);
+  }, 30_000);
 });
 
 describe('buildReport and Markdown', () => {
   const okIntegrity: IntegrityResult = {
     plaintextScan: { passed: true, tablesScanned: 4, rowsScanned: 530, leakCount: 0 },
+    fileScan: { status: 'passed', files: [{ name: 'cadencerx-benchmark.db', byteLength: 100, hits: 0 }], leakCount: 0 },
     wrongKeyRejected: { passed: true, canaryRejected: true, readsRefused: true },
     atomicRollback: { passed: true, rowsBefore: 510, rowsAfter: 510 },
     dataVerified: { passed: true, medications: 10, doseLogs: 500, rangeRows: 500, doseTaken: true },
   };
-  const run = (kind: 'cold' | 'warm', ms: [number, number, number, number], write = 2): RunResult => ({
+  const run = (kind: 'cold' | 'warm', ms: [number, number, number, number], writes: number[] = [2]): RunResult => ({
     kind,
     scenarioMs: { A: ms[0], B: ms[1], C: ms[2], D: ms[3] },
-    legacy: { writeLatencyMs: write, readLatencyMs: 0.5, batchWriteLatencyMs: 4 },
+    legacy: writes.map((write) => ({ writeLatencyMs: write, readLatencyMs: 0.5, batchWriteLatencyMs: 4 })),
   });
 
   it('judges A on cold and B–D on the warm average', () => {
     const report = buildReport(
       telemetry,
-      [run('cold', [150, 400, 100, 60], 20), run('warm', [10, 100, 20, 10]), run('warm', [10, 140, 40, 30]), run('warm', [10, 120, 30, 20])],
+      [run('cold', [150, 400, 100, 60], [20, 3]), run('warm', [10, 100, 20, 10]), run('warm', [10, 140, 40, 30]), run('warm', [10, 120, 30, 20])],
       okIntegrity,
       new Date('2026-10-16T16:00:00Z'),
     );
@@ -257,7 +291,10 @@ describe('buildReport and Markdown', () => {
     expect(byId.C.status).toBe('WARN'); // 30
     expect(byId.D.status).toBe('WARN'); // 20
     expect(report.overall).toBe('WARN');
-    expect(report.legacy.writeP95Ms).toBe(20);
+    expect(report.legacy.samples).toBe(5);
+    expect(report.legacy.write).toEqual({ coldMs: 20, avgWarmMs: 2, p50Ms: 2, p95Ms: 20, maxMs: 20 });
+    expect(report.legacy.read).toEqual({ coldMs: 0.5, avgWarmMs: 0.5, p50Ms: 0.5, p95Ms: 0.5, maxMs: 0.5 });
+    expect(report.legacy.batch.p95Ms).toBe(4);
     expect(report.legacy.writeTargetMet).toBe(false);
 
     const md = reportToMarkdown(report);
@@ -278,8 +315,16 @@ describe('buildReport and Markdown', () => {
     expect(md).toContain('| Batch Insert (500 Dose Logs) | 400.00 ms | 120.00 ms | <120 ms | WARN |');
     expect(md).toContain('| 365-Day Query & Hydration |');
     expect(md).toContain('| Single Dose Update + Streak Calc |');
-    expect(md).toContain('target not met');
-    expect(md).toContain('- [x] Zero plaintext exposure verified in local application sandbox files');
+    expect(md).toContain('- **Build:** release (quotable)');
+    expect(md).toContain('- **Battery / Power Mode:** _fill in');
+    expect(md).toContain('COR-71 `repository.runBenchmark()`, 5 samples over 4 runs');
+    expect(md).toContain('| Operation | Cold (1st sample) | Avg Warm | p50 | p95 | Max | Target |');
+    expect(md).toContain('| Single encrypted write | 20.00 ms | 2.00 ms | 2.00 ms | 20.00 ms | 20.00 ms | <15 ms (p95): FAIL |');
+    expect(md).toContain('| Indexed single-row read | 0.50 ms | 0.50 ms | 0.50 ms | 0.50 ms | 0.50 ms | — |');
+    expect(md).toContain('| 5-row encrypted batch (one transaction) | 4.00 ms |');
+    expect(md).toContain('write target on this run: **not met** (single-write p95 20.00 ms)');
+    expect(md).toContain('- [x] Zero plaintext exposure in benchmark data tables');
+    expect(md).toContain('- [x] No plaintext PHI in the benchmark database file (main + WAL + SHM): 0 hits across 100 bytes');
     expect(md).toContain('- [x] Sensitive fields in the SQLite database unreadable without the SecureStore encryption key');
     expect(md).toContain('COR-71 encrypts the sensitive fields, not the whole file');
     expect(md).toContain('- [x] Atomic transactions properly roll back without corrupted records on simulated write failure');
@@ -303,8 +348,10 @@ describe('buildReport and Markdown', () => {
     expect(md).toContain('- **OS Version:** unknown unknown (android)');
     expect(md).toContain('- **Chipset / Arch:** unknown');
     expect(md).toContain('app unknown');
-    expect(md).toContain('target met');
-    expect(md).toContain('- [ ] Zero plaintext exposure');
+    expect(md).toContain('- **Build:** unknown');
+    expect(md).toContain('<15 ms (p95): PASS');
+    expect(md).toContain('write target on this run: **met**');
+    expect(md).toContain('- [ ] Zero plaintext exposure in benchmark data tables');
     expect(md).toContain('- [x] Sensitive fields');
     expect(md).toContain('**FAIL**.');
 
@@ -328,6 +375,38 @@ describe('buildReport and Markdown', () => {
     expect(broken).toContain('- [ ] Sensitive fields');
     expect(broken).toContain('- [ ] Atomic transactions');
     expect(broken).toContain('(seeded-data verification failed)');
+  });
+
+  it('labels debug builds as not quotable', () => {
+    expect(describeBuild('debug')).toMatch(/^debug — .*not the quotable figure/);
+    expect(describeBuild('release', true)).toBe('release (quotable; enabled by EXPO_PUBLIC_COR88_BENCHMARK)');
+    expect(describeBuild(null)).toBe('unknown');
+    const md = reportToMarkdown(buildReport({ ...telemetry, buildMode: 'debug' }, [run('cold', [1, 1, 1, 1])], okIntegrity, new Date()));
+    expect(md).toContain('- **Build:** debug — development build');
+  });
+
+  it('marks file scan unavailable as non-evidence and failed file scan fails overall', () => {
+    const unavailable = reportToMarkdown(
+      buildReport(telemetry, [run('cold', [1, 1, 1, 1])], { ...okIntegrity, fileScan: { status: 'unavailable', files: [], leakCount: 0 } }, new Date()),
+    );
+    expect(unavailable).toContain('unavailable on this build — not COR-88 evidence');
+
+    const failed = buildReport(
+      telemetry,
+      [run('cold', [1, 1, 1, 1])],
+      {
+        ...okIntegrity,
+        fileScan: { status: 'failed', files: [{ name: 'cadencerx-benchmark.db', byteLength: 10, hits: 1 }], leakCount: 1 },
+      },
+      new Date(),
+    );
+    expect(failed.overall).toBe('FAIL');
+    expect(reportToMarkdown(failed)).toContain('1 hit(s) in raw file bytes (cadencerx-benchmark.db 10 B)');
+  });
+
+  it('reports zero micro stats for a run without samples', () => {
+    const empty = run('cold', [1, 1, 1, 1], []);
+    expect(microStats(empty, [], [empty], 'write')).toEqual({ coldMs: 0, avgWarmMs: 0, p50Ms: 0, p95Ms: 0, maxMs: 0 });
   });
 
   it('judges B–D on cold when there are no warm runs', () => {

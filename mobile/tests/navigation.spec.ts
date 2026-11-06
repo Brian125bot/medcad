@@ -98,12 +98,12 @@ describe('SYNC_STATUS_LABEL', () => {
 });
 
 describe('themeTabHref', () => {
-  it('shows the Theme tab at /two in development builds', () => {
+  it('shows the Theme tab when benchmark access is enabled', () => {
     expect(THEME_TAB_ROUTE).toBe('/two');
     expect(themeTabHref(true)).toBe('/two');
   });
 
-  it('hides the Theme tab in production builds', () => {
+  it('hides the Theme tab when benchmark access is disabled', () => {
     expect(themeTabHref(false)).toBeNull();
   });
 });

@@ -20,6 +20,7 @@ import { computeAdherenceAnalytics } from '../schedule/analytics';
 import { addDaysToKey } from '../schedule/date-keys';
 import type { DoseLogEntry, DoseLogMap, DoseStatus, Medication } from '../domain/medication-data';
 import { buildDoseKey } from '../domain/medication-data';
+import { scanFileBytesForSentinels, type DatabaseFileBytes, type FileScanResult, formatDatabaseFileSizes } from './database-file-scan';
 import { createStorageContext, VAULT_KEY_ID, type StorageContext, type StoragePlatform } from './context';
 import type { SecureKeyStore } from './ports';
 
@@ -56,6 +57,15 @@ export const GATED_ON: Record<ScenarioId, 'cold' | 'avgWarm'> = { A: 'cold', B: 
 
 export const DEFAULT_WARM_RUNS = 3;
 
+/**
+ * `repository.runBenchmark()` calls per run. With one cold + three warm runs
+ * that is 40 samples per operation, so p95 is not just the slowest of four.
+ */
+export const MICRO_SAMPLES_PER_RUN = 10;
+
+/** COR-71's original single-write target, judged on p95 over every sample. */
+export const WRITE_TARGET_MS = 15;
+
 export const ENCRYPTION_BACKEND = {
   scheme: 'App-level field encryption (COR-71)',
   cipher: 'AES-256-GCM',
@@ -74,6 +84,10 @@ export interface DeviceTelemetry {
   architecture: string | null;
   isPhysicalDevice: boolean | null;
   appVersion?: string | null;
+  /** `__DEV__` at run time. Debug builds run JS with dev checks; only release figures are quotable. */
+  buildMode?: 'debug' | 'release' | null;
+  /** True when `EXPO_PUBLIC_COR88_BENCHMARK=1` was inlined at bundle time. */
+  benchmarkFlag?: boolean;
 }
 
 export interface BenchmarkEnvironment {
@@ -81,6 +95,8 @@ export interface BenchmarkEnvironment {
   createPlatform(): StoragePlatform;
   /** Delete the benchmark database file(s) and the benchmark keystore entry. Must be idempotent. */
   destroy(): Promise<void>;
+  /** Raw bytes of the benchmark DB file and `-wal` / `-shm` sidecars (basename only). */
+  readDatabaseFiles?(): Promise<DatabaseFileBytes[] | null>;
 }
 
 export interface BenchmarkProgress {
@@ -110,8 +126,22 @@ export interface LegacyMicroBenchmark {
 export interface RunResult {
   kind: 'cold' | 'warm';
   scenarioMs: Record<ScenarioId, number>;
-  legacy: LegacyMicroBenchmark;
+  /** One entry per `runBenchmark()` call in this run, in call order. */
+  legacy: LegacyMicroBenchmark[];
 }
+
+export interface MicroStats {
+  /** First sample of the cold run. */
+  coldMs: number;
+  /** Mean of every sample from the warm runs (0 with no warm runs). */
+  avgWarmMs: number;
+  /** Nearest-rank percentiles over every sample, cold and warm. */
+  p50Ms: number;
+  p95Ms: number;
+  maxMs: number;
+}
+
+export type MicroOperation = 'write' | 'read' | 'batch';
 
 export interface ScenarioResult {
   id: ScenarioId;
@@ -126,13 +156,14 @@ export interface ScenarioResult {
 
 export interface IntegrityResult {
   plaintextScan: { passed: boolean; tablesScanned: number; rowsScanned: number; leakCount: number };
+  fileScan: FileScanResult;
   wrongKeyRejected: { passed: boolean; canaryRejected: boolean; readsRefused: boolean };
   atomicRollback: { passed: boolean; rowsBefore: number; rowsAfter: number };
   dataVerified: { passed: boolean; medications: number; doseLogs: number; rangeRows: number; doseTaken: boolean };
 }
 
 export interface DeviceBenchmarkReport {
-  schema: 'cadencerx.cor88.device-benchmark/v1';
+  schema: 'cadencerx.cor88.device-benchmark/v3';
   generatedAt: string;
   telemetry: DeviceTelemetry;
   encryption: typeof ENCRYPTION_BACKEND;
@@ -141,11 +172,12 @@ export interface DeviceBenchmarkReport {
   scenarios: ScenarioResult[];
   legacy: {
     runs: number;
-    writeP50Ms: number;
-    writeP95Ms: number;
-    readP50Ms: number;
-    batchP50Ms: number;
-    writeTargetMs: 15;
+    samples: number;
+    write: MicroStats;
+    read: MicroStats;
+    batch: MicroStats;
+    writeTargetMs: number;
+    /** `write.p95Ms < writeTargetMs`. */
     writeTargetMet: boolean;
   };
   integrity: IntegrityResult;
@@ -419,10 +451,18 @@ async function runOnce(
     step('D');
 
     // COR-71 micro-benchmark (single write / read / 5-row batch), reused as-is.
-    const legacy = await ctx.repository.runBenchmark();
+    // It deletes its own `bench%` rows after every call; the dataset's ids start with a date.
+    const legacy: LegacyMicroBenchmark[] = [];
+    for (let sample = 0; sample < MICRO_SAMPLES_PER_RUN; sample += 1) {
+      const { writeLatencyMs, readLatencyMs, batchWriteLatencyMs } = await ctx.repository.runBenchmark();
+      legacy.push({ writeLatencyMs, readLatencyMs, batchWriteLatencyMs });
+    }
 
+    const sentinelUnion = [...dataset.sentinels, ...rollbackSet.sentinels];
+    const rawFiles = env.readDatabaseFiles ? await env.readDatabaseFiles() : null;
     const integrity: IntegrityResult = {
-      plaintextScan: await scanForPlaintext(platform, [...dataset.sentinels, ...rollbackSet.sentinels]),
+      plaintextScan: await scanForPlaintext(platform, sentinelUnion),
+      fileScan: scanFileBytesForSentinels(rawFiles, sentinelUnion),
       wrongKeyRejected: { passed: false, canaryRejected: false, readsRefused: false },
       atomicRollback: { passed: rowsAfter === medications + doseLogs, rowsBefore: medications + doseLogs, rowsAfter },
       dataVerified: {
@@ -444,11 +484,7 @@ async function runOnce(
       result: {
         kind,
         scenarioMs: { A: round2(aMs), B: round2(bMs), C: round2(cMs), D: round2(dMs) },
-        legacy: {
-          writeLatencyMs: legacy.writeLatencyMs,
-          readLatencyMs: legacy.readLatencyMs,
-          batchWriteLatencyMs: legacy.batchWriteLatencyMs,
-        },
+        legacy,
       },
       integrity,
     };
@@ -458,11 +494,32 @@ async function runOnce(
   }
 }
 
+function mergeFileScan(all: IntegrityResult[]): FileScanResult {
+  if (all.some((row) => row.fileScan.status === 'failed')) {
+    const files = all.flatMap((row) => row.fileScan.files);
+    return {
+      status: 'failed',
+      files,
+      leakCount: all.reduce((total, row) => total + row.fileScan.leakCount, 0),
+    };
+  }
+  if (all.some((row) => row.fileScan.status === 'passed')) {
+    const passed = all.find((row) => row.fileScan.status === 'passed')!.fileScan;
+    return {
+      status: 'passed',
+      files: passed.files,
+      leakCount: all.reduce((total, row) => total + row.fileScan.leakCount, 0),
+    };
+  }
+  return { status: 'unavailable', files: [], leakCount: 0 };
+}
+
 function mergeIntegrity(all: IntegrityResult[]): IntegrityResult {
   const first = all[0];
   const every = (pick: (r: IntegrityResult) => boolean) => all.every(pick);
   return {
     plaintextScan: { ...first.plaintextScan, passed: every((r) => r.plaintextScan.passed), leakCount: all.reduce((n, r) => n + r.plaintextScan.leakCount, 0) },
+    fileScan: mergeFileScan(all),
     wrongKeyRejected: { ...first.wrongKeyRejected, passed: every((r) => r.wrongKeyRejected.passed) },
     atomicRollback: { ...first.atomicRollback, passed: every((r) => r.atomicRollback.passed) },
     dataVerified: { ...first.dataVerified, passed: every((r) => r.dataVerified.passed) },
@@ -500,6 +557,24 @@ export async function runDeviceBenchmark(
   return buildReport(telemetry, runs, mergeIntegrity(integrity), wallClock());
 }
 
+const MICRO_FIELD: Record<MicroOperation, keyof LegacyMicroBenchmark> = {
+  write: 'writeLatencyMs',
+  read: 'readLatencyMs',
+  batch: 'batchWriteLatencyMs',
+};
+
+export function microStats(cold: RunResult, warm: RunResult[], all: RunResult[], op: MicroOperation): MicroStats {
+  const field = MICRO_FIELD[op];
+  const values = all.flatMap((run) => run.legacy.map((sample) => sample[field]));
+  return {
+    coldMs: cold.legacy.length > 0 ? cold.legacy[0][field] : 0,
+    avgWarmMs: round2(average(warm.flatMap((run) => run.legacy.map((sample) => sample[field])))),
+    p50Ms: percentile(values, 50),
+    p95Ms: percentile(values, 95),
+    maxMs: percentile(values, 100),
+  };
+}
+
 export function buildReport(
   telemetry: DeviceTelemetry,
   runs: RunResult[],
@@ -524,24 +599,25 @@ export function buildReport(
       status: evaluateGate(measured, BENCHMARK_GATES[id]),
     };
   });
-  const writes = runs.map((run) => run.legacy.writeLatencyMs);
+  const write = microStats(cold, warm, runs, 'write');
   const legacy = {
     runs: runs.length,
-    writeP50Ms: percentile(writes, 50),
-    writeP95Ms: percentile(writes, 95),
-    readP50Ms: percentile(runs.map((run) => run.legacy.readLatencyMs), 50),
-    batchP50Ms: percentile(runs.map((run) => run.legacy.batchWriteLatencyMs), 50),
-    writeTargetMs: 15 as const,
-    writeTargetMet: percentile(writes, 95) < 15,
+    samples: runs.reduce((n, run) => n + run.legacy.length, 0),
+    write,
+    read: microStats(cold, warm, runs, 'read'),
+    batch: microStats(cold, warm, runs, 'batch'),
+    writeTargetMs: WRITE_TARGET_MS,
+    writeTargetMet: write.p95Ms < WRITE_TARGET_MS,
   };
   const integrityOk =
     integrity.plaintextScan.passed &&
+    integrity.fileScan.status !== 'failed' &&
     integrity.wrongKeyRejected.passed &&
     integrity.atomicRollback.passed &&
     integrity.dataVerified.passed;
   const overall = integrityOk ? worstStatus(scenarios.map((scenario) => scenario.status)) : 'FAIL';
   return {
-    schema: 'cadencerx.cor88.device-benchmark/v1',
+    schema: 'cadencerx.cor88.device-benchmark/v3',
     generatedAt: generatedAt.toISOString(),
     telemetry,
     encryption: ENCRYPTION_BACKEND,
@@ -566,6 +642,42 @@ function orUnknown(value: string | null | undefined): string {
   return value === null || value === undefined || value === '' ? 'unknown' : value;
 }
 
+/** Device line shared by the benchmark report and the diagnostics text. */
+export function describeDevice(t: DeviceTelemetry): string {
+  const device = t.manufacturer ? `${t.manufacturer} ${orUnknown(t.deviceModel)}` : orUnknown(t.deviceModel);
+  const physical =
+    t.isPhysicalDevice === null ? ' (physical device: unknown)' : t.isPhysicalDevice ? '' : ' (simulator/emulator — not valid COR-88 evidence)';
+  return `${device}${physical}`;
+}
+
+export function describeBuild(mode: DeviceTelemetry['buildMode'], benchmarkFlag?: boolean): string {
+  if (mode === 'release' && benchmarkFlag) return 'release (quotable; enabled by EXPO_PUBLIC_COR88_BENCHMARK)';
+  if (mode === 'release') return 'release (quotable)';
+  if (mode === 'debug') return 'debug — development build with JS dev checks; not the quotable figure, re-run in release';
+  return 'unknown';
+}
+
+function fileScanMarkdownLine(fileScan: FileScanResult): string {
+  if (fileScan.status === 'passed') {
+    const bytes = fileScan.files.reduce((total, file) => total + file.byteLength, 0);
+    return `- ${checkbox(true)} No plaintext PHI in the benchmark database file (main + WAL + SHM): 0 hits across ${bytes} bytes (${formatDatabaseFileSizes(fileScan.files)})`;
+  }
+  if (fileScan.status === 'failed') {
+    return `- ${checkbox(false)} No plaintext PHI in the benchmark database file (main + WAL + SHM): ${fileScan.leakCount} hit(s) in raw file bytes (${formatDatabaseFileSizes(fileScan.files)})`;
+  }
+  return `- ${checkbox(false)} No plaintext PHI in the benchmark database file (main + WAL + SHM): unavailable on this build — not COR-88 evidence`;
+}
+
+const MICRO_LABELS: Record<MicroOperation, string> = {
+  write: 'Single encrypted write',
+  read: 'Indexed single-row read',
+  batch: '5-row encrypted batch (one transaction)',
+};
+
+function ms(value: number): string {
+  return `${value.toFixed(2)} ms`;
+}
+
 function checkbox(passed: boolean): string {
   return passed ? '[x]' : '[ ]';
 }
@@ -581,18 +693,18 @@ export const TEMPLATE_OPERATIONS: Record<ScenarioId, string> = {
 /** Markdown in Brian's COR-88 template (sections kept verbatim). */
 export function reportToMarkdown(report: DeviceBenchmarkReport): string {
   const t = report.telemetry;
-  const device = t.manufacturer ? `${t.manufacturer} ${orUnknown(t.deviceModel)}` : orUnknown(t.deviceModel);
-  const physical =
-    t.isPhysicalDevice === null ? ' (physical device: unknown)' : t.isPhysicalDevice ? '' : ' (simulator/emulator — not valid COR-88 evidence)';
   const i = report.integrity;
+  const l = report.legacy;
   const lines = [
     '### COR-88 Physical Device Benchmark Report',
     '',
     '#### 1. Hardware & Environment',
     '',
-    `- **Device Model:** ${device}${physical}`,
+    `- **Device Model:** ${describeDevice(t)}`,
     `- **OS Version:** ${orUnknown(t.osName)} ${orUnknown(t.osVersion)} (${t.platform})`,
     `- **Chipset / Arch:** ${orUnknown(t.architecture)}`,
+    `- **Build:** ${describeBuild(t.buildMode, t.benchmarkFlag)}`,
+    '- **Battery / Power Mode:** _fill in: battery %, on charger, Low Power Mode / Battery Saver off_',
     `- **Storage Layer:** expo-sqlite with app-level ${report.encryption.cipher} field encryption (${report.encryption.cipherProvider}); key in SecureStore (iOS Keychain / Android Keystore), canary-verified. The database file itself is not encrypted (not SQLCipher).`,
     '',
     '#### 2. Benchmark Telemetry Results',
@@ -606,13 +718,24 @@ export function reportToMarkdown(report: DeviceBenchmarkReport): string {
     '',
     `Runs: 1 cold + ${report.warmRuns} warm; dataset ${report.dataset.medications} medications / ${report.dataset.doseLogs} dose logs / ${report.dataset.rangeDays} days. ` +
       `Status: PASS below the target, FAIL above ${report.scenarios.map((s) => `${s.gate.failAboveMs}`).join(' / ')} ms (A–D), WARN in between; ` +
-      'the first row is judged on Cold, the others on Avg Warm. ' +
-      `COR-71 \`runBenchmark()\` single encrypted write p50/p95: ${report.legacy.writeP50Ms.toFixed(2)} / ${report.legacy.writeP95Ms.toFixed(2)} ms ` +
-      `(<${report.legacy.writeTargetMs} ms target ${report.legacy.writeTargetMet ? 'met' : 'not met'}). Generated ${report.generatedAt}, app ${orUnknown(t.appVersion)}.`,
+      `the first row is judged on Cold, the others on Avg Warm. Generated ${report.generatedAt}, app ${orUnknown(t.appVersion)}.`,
+    '',
+    `COR-71 \`repository.runBenchmark()\`, ${l.samples} samples over ${l.runs} runs; p50 / p95 / max over all samples:`,
+    '',
+    '| Operation | Cold (1st sample) | Avg Warm | p50 | p95 | Max | Target |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    ...(['write', 'read', 'batch'] as const).map((op) => {
+      const s = l[op];
+      const target = op === 'write' ? `<${l.writeTargetMs} ms (p95): ${l.writeTargetMet ? 'PASS' : 'FAIL'}` : '—';
+      return `| ${MICRO_LABELS[op]} | ${ms(s.coldMs)} | ${ms(s.avgWarmMs)} | ${ms(s.p50Ms)} | ${ms(s.p95Ms)} | ${ms(s.maxMs)} | ${target} |`;
+    }),
+    '',
+    `COR-71 \`<${l.writeTargetMs} ms\` write target on this run: **${l.writeTargetMet ? 'met' : 'not met'}** (single-write p95 ${ms(l.write.p95Ms)}).`,
     '',
     '#### 3. Cryptographic & Data Integrity Verification',
     '',
-    `- ${checkbox(i.plaintextScan.passed)} Zero plaintext exposure verified in local application sandbox files (every raw row of the ${i.plaintextScan.tablesScanned} data tables in the benchmark SQLite database scanned: ${i.plaintextScan.rowsScanned} rows, ${i.plaintextScan.leakCount} hits)`,
+    `- ${checkbox(i.plaintextScan.passed)} Zero plaintext exposure in benchmark data tables (every raw row of the ${i.plaintextScan.tablesScanned} data tables scanned: ${i.plaintextScan.rowsScanned} rows, ${i.plaintextScan.leakCount} hits)`,
+    fileScanMarkdownLine(i.fileScan),
     `- ${checkbox(i.wrongKeyRejected.passed)} Sensitive fields in the SQLite database unreadable without the SecureStore encryption key (a wrong key is rejected by the canary and reads are refused). Note: COR-71 encrypts the sensitive fields, not the whole file; structural columns (ids, dates, status, times, stock counts) are plaintext by design.`,
     `- ${checkbox(i.atomicRollback.passed)} Atomic transactions properly roll back without corrupted records on simulated write failure`,
     '',

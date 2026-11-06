@@ -149,4 +149,4 @@ Linear COR-71 requires local encrypted write latency below **15ms**. `repository
 - **Indexed Single-Row Read Latency (local developer machine)**: ~0.02 – 0.30ms — **PASS locally only**
 - **5-Row Encrypted Batch Transaction (local developer machine)**: ~0.40 – 3.50ms — **PASS locally only**
 
-Device measurement tooling (COR-88): see [device-benchmark.md](device-benchmark.md). No device numbers have been recorded yet.
+Device measurement tooling (COR-88): see [device-benchmark.md](device-benchmark.md); the hardware run sheet is [cor-88-device-run-package.md](cor-88-device-run-package.md). No device numbers have been recorded yet. When they are, they replace this section as the authoritative claim (single-write p95 against `< 15 ms`).

@@ -21,12 +21,13 @@ class ExactAlarmModule : Module() {
     }
 
     Function("openExactAlarmSettings") {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@Function
-      val context = appContext.reactContext ?: return@Function
-      context.startActivity(
-        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
-          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      )
+      val context = appContext.reactContext
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && context != null) {
+        context.startActivity(
+          Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+      }
     }
   }
 }

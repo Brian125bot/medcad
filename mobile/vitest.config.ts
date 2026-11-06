@@ -7,7 +7,16 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['lib/schedule/**/*.ts', 'lib/wizard/**/*.ts', 'lib/today/**/*.ts', 'lib/storage/device-benchmark.ts', 'lib/storage/diagnostics.ts', 'lib/notifications/**/*.ts'],
+      include: [
+        'lib/schedule/**/*.ts',
+        'lib/wizard/**/*.ts',
+        'lib/today/**/*.ts',
+        'lib/storage/benchmark-access.ts',
+        'lib/storage/database-file-scan.ts',
+        'lib/storage/device-benchmark.ts',
+        'lib/storage/diagnostics.ts',
+        'lib/notifications/**/*.ts',
+      ],
       // Expo adapters and the wiring index are device-only, like lib/storage/expo-*.ts.
       // Vitest's default exclude drops any `*-benchmark.ts` file (it matches its
       // bench pattern), which would silently skip the COR-88 harness. Only tests are excluded.

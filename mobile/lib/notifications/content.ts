@@ -9,7 +9,7 @@
 import { formatClockTime } from './fire-time';
 import type { AlertProfile, PlannedNotification, ReminderSettings } from './types';
 
-export const CHIME_SOUND_FILE = 'cadencerx-chime.wav';
+export const CHIME_SOUND_FILE = 'cadencerx_chime.wav';
 
 export interface ReminderChannel {
   id: string;

@@ -22,11 +22,11 @@ export const INITIAL_TAB: PrimaryTabName = "today";
 export const THEME_TAB_ROUTE = "/two";
 
 /**
- * `href` for the Theme tab: shown in development builds, hidden (`null`) in
- * production. Pass `__DEV__`.
+ * `href` for the Theme tab: shown when COR-88 benchmark access is enabled,
+ * hidden (`null`) otherwise. Pass the result of `isBenchmarkAccessEnabled`.
  */
-export function themeTabHref(isDev: boolean): typeof THEME_TAB_ROUTE | null {
-  return isDev ? THEME_TAB_ROUTE : null;
+export function themeTabHref(benchmarkAccessEnabled: boolean): typeof THEME_TAB_ROUTE | null {
+  return benchmarkAccessEnabled ? THEME_TAB_ROUTE : null;
 }
 
 /** Largest count a badge shows before collapsing to "99+". */
