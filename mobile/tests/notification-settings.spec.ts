@@ -12,7 +12,9 @@ import {
   summarizeLeadMinutes,
   withAlert,
   withLeadMinutes,
- leadChipLabel, leadChipOptions } from '../lib/notifications/settings';
+  leadChipLabel,
+  leadChipOptions,
+} from '../lib/notifications/settings';
 import { makeMed } from './notification-fixtures';
 
 function prefs(values: Record<string, unknown>) {

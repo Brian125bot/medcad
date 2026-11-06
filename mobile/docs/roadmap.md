@@ -42,7 +42,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
-| COR-76 | Native background alarm and notification engine | 5 | In review | Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Not device-tested; Android exact-alarm denial is not detectable from JS |
+| COR-76 | Native background alarm and notification engine | 5 | In review | Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Not device-tested; Android exact-alarm access comes from the local `modules/exact-alarm` module, which is unbuilt until the first development build |
 | COR-77 | Interactive lock-screen notification actions | 5 | Backlog | Blocked by COR-74 and COR-76 |
 
 ### M4 — Cabinet, refills and calendar sync

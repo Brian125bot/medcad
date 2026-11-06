@@ -55,7 +55,7 @@ app start / foreground ───────────────────
 | Grouping | one notification per identical fire instant (not per dose time); loudest profile wins (sound = any, vibrate = any) |
 | Ids | `cx.dose.<fireDateKey>.<HHmm>`; `cx.snooze.` (COR-77) and `cx.refill.` (COR-78) are never touched |
 | Budget | at most 48 `cx.dose.` entries including the sentinel; 16 more are left for COR-77 / COR-78 (iOS keeps 64 pending) |
-| Sentinel | when truncated, the last slot is `cx.dose.sentinel`, 5 min after the last kept reminder: "Open CadenceRx to keep reminders on" |
+| Sentinel | whenever any active medication has a reminder-enabled slot, one budget slot is `cx.dose.sentinel` ("Open CadenceRx to keep reminders on"). Truncated: 5 min after the last kept reminder. Not truncated: 09:00 on today + 13, but never earlier than now + 5 min. `truncated` means the budget cut dose reminders |
 | Clock | domain code takes an explicit `{ todayKey, minuteOfDay }`; `expo-clock.ts` is the only caller of `civilToLocalDate` |
 
 Planning 50 medications × 8 slots × 14 days takes ~20 ms under Node with
@@ -103,17 +103,35 @@ Regimen tab → bell → **Reminders** (`app/reminder-settings.tsx`):
 - Foreground presentation uses `shouldShowBanner` / `shouldShowList`
   (`shouldShowAlert` is deprecated in 57).
 - **Exact alarms (Android 12+).** `app.json` declares `SCHEDULE_EXACT_ALARM`
-  (not `USE_EXACT_ALARM`). Expo 57 calls `setExactAndAllowWhileIdle` when
-  `canScheduleExactAlarms()` is true and otherwise falls back to inexact
-  `setAndAllowWhileIdle`, but exposes **no JS API to read that state**, so the
-  engine reports Android exact-alarm access as `unknown` and never shows the
-  `exact-alarm-denied` banner by itself. The settings screen always offers an
-  *Alarms & reminders access* link (`android.settings.REQUEST_SCHEDULE_EXACT_ALARM`,
-  falling back to app settings). A small native module would be needed to
-  detect denial.
-- iOS reports a pending date trigger back as a relative time interval, so the
-  adapter remembers what it scheduled in memory; after a cold start the first
-  reconcile reschedules the dose set once.
+  (not `USE_EXACT_ALARM`). Android does not pre-grant it to new installs on
+  Android 14+. Expo 57 picks exact (`setExactAndAllowWhileIdle`) or inexact
+  (`setAndAllowWhileIdle`) **when each alarm is scheduled**, and exposes no JS
+  API for that state. The local Expo module `modules/exact-alarm` (Android
+  only, autolinked from `modules/`) adds `canScheduleExactAlarms()` and
+  `openExactAlarmSettings()` (this app's *Alarms & reminders* page via a
+  `package:` URI). `expo-exact-alarm.ts` loads it with
+  `requireOptionalNativeModule`, so Expo Go, iOS and web get `null` and the
+  status is `unknown`.
+  - Each scheduled entry records whether it was set while access was allowed
+    (`exact` in the schedule metadata below). `exact = status !== 'denied'`, so
+    `unknown` never causes churn. When access is granted later, the next
+    reconcile (foreground) sees `exact: false` and replaces every entry once.
+    Per the Android docs, revoking access stops the app and cancels its future
+    exact alarms; the next launch reconciles and re-arms them.
+  - When access is denied the status is `exact-alarm-denied` and the Reminders
+    settings banner shows. The medication wizard also shows a one-time
+    "Allow exact reminders" alert after notification permission is granted
+    (encrypted preference `notifications.exactAlarmPrompted`).
+  - The Kotlin module has not been compiled in CI (no Android SDK); the first
+    Android development build is its compile gate.
+- **Schedule metadata.** iOS reports a pending date trigger back as a relative
+  time interval, so each request's `data` carries non-PHI metadata
+  `sched: { at, hash, exact }` (fire epoch ms, `hashReminderContent` of the
+  content without the metadata, exact-alarm flag). `listScheduled()` reads the
+  fire time from an Android date trigger, otherwise from `sched.at`, and the
+  hash and `exact` from the metadata, so a cold start reschedules nothing that
+  is still correct. Entries scheduled by a build without metadata mismatch
+  once and are replaced once.
 - Reboot: Expo's boot receiver re-arms scheduled alarms on Android.
 - Time-zone changes: Android alarms are absolute; the next foreground
   reconcile sees the epoch mismatch and reschedules at the new local time.
@@ -144,3 +162,10 @@ Not verified by the author — run on a physical iPhone and Android phone:
 - [ ] Changing the device time zone, then opening the app, reschedules correctly
 - [ ] Lock screen shows no medication names by default; names appear only after opt-in
 - [ ] Tapping a reminder (warm and cold start) opens Today
+- [ ] Android 14+, access off: the one-time prompt appears once; the Reminders banner shows; "Open settings" lands on this app's *Alarms & reminders* page
+- [ ] Grant access, return to the app: the next reconcile replaces every `cx.dose.` entry (watch `getAllScheduledNotificationsAsync()` and the first alarm's real fire time)
+- [ ] Revoke access: the app restarts, reconciles, and reminders are re-armed
+- [ ] Doze: `adb shell dumpsys deviceidle force-idle`, screen off, reminder two minutes out. Record the delay with access granted and with access denied
+- [ ] Cold-start the app on iOS with 48 entries scheduled: the first reconcile cancels and schedules nothing
+- [ ] Set `PLANNING_HORIZON_DAYS` to 2 locally with a light regimen: the window-end sentinel fires at 09:00 on the last day
+- [ ] A 20-minute lead time set in the wizard shows as a selected chip in settings

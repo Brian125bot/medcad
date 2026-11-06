@@ -32,7 +32,12 @@ the issue id and PR number where there are any.
   `cx.dose.` plan on start, save and foreground. Generic lock-screen text by
   default (names opt-in), grouped by fire instant, four fixed Android channels,
   a generated 880 + 1320 Hz chime, encrypted per-medication sound / vibration,
-  and a Reminders settings screen from the Regimen bell. See
+  and a Reminders settings screen from the Regimen bell. A window-end sentinel
+  is always scheduled while any reminder is on; each entry carries non-PHI
+  schedule metadata (fire time, content hash, exact flag) so cold starts do not
+  reschedule; a local Android `exact-alarm` module (unbuilt until the first
+  development build) reports *Alarms & reminders* access, re-arms inexact
+  alarms once access is granted, and backs a one-time wizard prompt. See
   [`notifications.md`](mobile/docs/notifications.md). *(COR-76)*
 - **[mobile]** COR-88 device storage benchmark tooling (no device numbers yet):
   `lib/storage/device-benchmark.ts` times cold init, a 10-medication / 500-log
