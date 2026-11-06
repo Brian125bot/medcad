@@ -47,7 +47,12 @@ describe('buildReminderContent', () => {
         { d: '2026-10-16', m: 'm1', s: 'slot-am' },
       ],
     });
-    expect(content).toMatchObject({ channelId: 'reminders-sound-vibrate-v1', sound: true, vibrate: true });
+    expect(content).toMatchObject({
+      channelId: 'reminders-sound-vibrate-v1',
+      sound: true,
+      vibrate: true,
+      categoryIdentifier: 'dose_reminder',
+    });
   });
 
   it('uses singular wording for one dose', () => {

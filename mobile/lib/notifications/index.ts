@@ -3,7 +3,9 @@
  * `ensureReminderPermission`, `getReminderStatus`/`subscribeReminderStatus`
  * (via `useReminderStatus`) and the settings openers; they never schedule.
  */
+import './background-task';
 import { Alert, AppState, Linking, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 
 import type { StorageContext } from '../storage/context';
 import { EXACT_ALARM_PROMPT, PREF_EXACT_ALARM_PROMPTED, shouldPromptForExactAlarm } from './exact-alarm';
@@ -15,9 +17,21 @@ import {
   createExpoScheduler,
   subscribeToReminderTaps,
 } from './expo-scheduler';
+import { getStorageContext } from '../storage';
+import { setNotificationResponseContextProvider } from './notification-response-context';
+import {
+  dispatchNotificationResponse,
+  isDefaultReminderTap,
+  registerReminderActionBackgroundTask,
+  subscribeToReminderActions,
+  wireNotificationResponseContext,
+} from './notification-response';
+
+setNotificationResponseContextProvider(() => getStorageContext());
 import type { NotificationPermission } from './ports';
 import { INITIAL_REMINDER_STATUS, ReminderEngine } from './reconciler';
 import type { ReminderStatus } from './types';
+import { ACTION_SKIP_DOSE, ACTION_SNOOZE_15M, ACTION_TAKE_DOSE } from './types';
 
 export type { ReminderStatus } from './types';
 
@@ -48,8 +62,21 @@ export function startReminderEngine(
   });
   engine = current;
   promptRepository = context.repository;
+  wireNotificationResponseContext(context);
   const offStatus = current.subscribeStatus(() => publish(current.getStatus()));
   const offTaps = subscribeToReminderTaps(options.onOpenToday);
+  const offActions = subscribeToReminderActions();
+  void registerReminderActionBackgroundTask();
+  const coldStart = Notifications.getLastNotificationResponse();
+  if (coldStart) {
+    const action = coldStart.actionIdentifier;
+    if (action === ACTION_TAKE_DOSE || action === ACTION_SNOOZE_15M || action === ACTION_SKIP_DOSE) {
+      void dispatchNotificationResponse(coldStart).finally(() => Notifications.clearLastNotificationResponse());
+    } else if (isDefaultReminderTap(coldStart)) {
+      Notifications.clearLastNotificationResponse();
+      options.onOpenToday();
+    }
+  }
   const appState = AppState.addEventListener('change', (next) => {
     if (next === 'active') void current.reconcile();
   });
@@ -59,6 +86,7 @@ export function startReminderEngine(
     current.stop();
     offStatus();
     offTaps();
+    offActions();
     appState.remove();
     if (engine === current) {
       engine = null;

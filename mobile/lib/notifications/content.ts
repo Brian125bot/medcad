@@ -8,6 +8,7 @@
  */
 import { formatClockTime } from './fire-time';
 import type { AlertProfile, PlannedNotification, ReminderSettings } from './types';
+import { DOSE_REMINDER_CATEGORY } from './types';
 
 export const CHIME_SOUND_FILE = 'cadencerx_chime.wav';
 
@@ -41,6 +42,8 @@ export interface ReminderContent {
   channelId: string;
   sound: boolean;
   vibrate: boolean;
+  /** Lock-screen action category (COR-77). */
+  categoryIdentifier?: string;
 }
 
 export type TimeFormatter = (dateKey: string, minuteOfDay: number) => string;
@@ -94,6 +97,7 @@ export function buildReminderContent(
     channelId,
     sound,
     vibrate,
+    categoryIdentifier: DOSE_REMINDER_CATEGORY,
   };
 }
 

@@ -20,7 +20,14 @@ export default defineConfig({
       // Expo adapters and the wiring index are device-only, like lib/storage/expo-*.ts.
       // Vitest's default exclude drops any `*-benchmark.ts` file (it matches its
       // bench pattern), which would silently skip the COR-88 harness. Only tests are excluded.
-      exclude: ['tests/**', 'lib/notifications/expo-*.ts', 'lib/notifications/index.ts', 'lib/notifications/ports.ts'],
+      exclude: [
+        'tests/**',
+        'lib/notifications/expo-*.ts',
+        'lib/notifications/index.ts',
+        'lib/notifications/ports.ts',
+        'lib/notifications/background-task.ts',
+        'lib/notifications/notification-response.ts',
+      ],
       thresholds: {
         lines: 100,
         branches: 100,

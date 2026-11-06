@@ -6,6 +6,8 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { buildDoseKey } from '../schedule/doses';
+import { DOSE_REMINDER_ACTIONS, DOSE_REMINDER_CATEGORY } from './categories';
 import { CHIME_SOUND_FILE, hashReminderContent, REMINDER_CHANNELS } from './content';
 import type {
   ExactAlarmPermission,
@@ -16,13 +18,23 @@ import type {
 } from './ports';
 import { toExactAlarmStatus } from './exact-alarm';
 import { canScheduleExactAlarms } from './expo-exact-alarm';
+import { parseDoseGroupPayload } from './payload';
 import { readScheduleMeta, withScheduleMeta } from './schedule-meta';
-import { DOSE_NAMESPACE } from './types';
+import { DOSE_NAMESPACE, SNOOZE_NAMESPACE } from './types';
 
 const VIBRATION_PATTERN = [0, 250, 250, 250];
 
+function doseKeysFromData(data: unknown): string[] | undefined {
+  try {
+    return parseDoseGroupPayload(data).map((d) => buildDoseKey(d.dateKey, d.medicationId, d.slotId));
+  } catch {
+    return undefined;
+  }
+}
+
 export function createExpoScheduler(): NotificationSchedulerPort {
   let channelsReady: Promise<void> | null = null;
+  let categoriesReady: Promise<void> | null = null;
 
   return {
     ensureChannels() {
@@ -47,6 +59,30 @@ export function createExpoScheduler(): NotificationSchedulerPort {
       return channelsReady;
     },
 
+    ensureActionCategories() {
+      categoriesReady ??= Promise.all(
+        DOSE_REMINDER_ACTIONS.length
+          ? [
+              Notifications.setNotificationCategoryAsync(
+                DOSE_REMINDER_CATEGORY,
+                DOSE_REMINDER_ACTIONS.map((action) => ({
+                  identifier: action.identifier,
+                  buttonTitle: action.buttonTitle,
+                  options: { opensAppToForeground: action.opensAppToForeground },
+                })),
+              ),
+            ]
+          : [],
+      ).then(
+        () => undefined,
+        (error: unknown) => {
+          categoriesReady = null;
+          throw error;
+        },
+      );
+      return categoriesReady;
+    },
+
     async listScheduled(): Promise<ScheduledReminder[]> {
       const requests = await Notifications.getAllScheduledNotificationsAsync();
       return requests.map((request) => {
@@ -55,7 +91,8 @@ export function createExpoScheduler(): NotificationSchedulerPort {
         // at schedule time is the source of truth there; Android reports the epoch.
         const meta = readScheduleMeta(request.content.data);
         const fireAtMs = trigger.type === 'date' && typeof trigger.value === 'number' ? trigger.value : (meta?.at ?? null);
-        return { id: request.identifier, fireAtMs, contentHash: meta?.hash ?? null, exact: meta?.exact ?? null };
+        const doseKeys = doseKeysFromData(request.content.data);
+        return { id: request.identifier, fireAtMs, contentHash: meta?.hash ?? null, exact: meta?.exact ?? null, doseKeys };
       });
     },
 
@@ -67,6 +104,7 @@ export function createExpoScheduler(): NotificationSchedulerPort {
           title: content.title,
           body: content.body,
           data: data as unknown as Record<string, unknown>,
+          categoryIdentifier: content.categoryIdentifier ?? DOSE_REMINDER_CATEGORY,
           // iOS plays this file (or nothing); Android uses the channel's sound.
           sound: content.sound ? CHIME_SOUND_FILE : false,
           ...(content.vibrate ? { vibrate: VIBRATION_PATTERN } : {}),
@@ -77,6 +115,14 @@ export function createExpoScheduler(): NotificationSchedulerPort {
 
     async cancel(id) {
       await Notifications.cancelScheduledNotificationAsync(id);
+    },
+
+    async setBadgeCount(count: number) {
+      try {
+        await Notifications.setBadgeCountAsync(Math.max(0, count));
+      } catch {
+        // Android launchers without badge support still receive the call.
+      }
     },
   };
 }
@@ -94,7 +140,7 @@ export function createExpoPermissions(): NotificationPermissionPort {
     },
     async request() {
       const result = await Notifications.requestPermissionsAsync({
-        ios: { allowAlert: true, allowSound: true, allowBadge: false },
+        ios: { allowAlert: true, allowSound: true, allowBadge: true },
       });
       return toPermission(result.status);
     },
@@ -118,18 +164,19 @@ export function configureForegroundPresentation(): void {
   });
 }
 
-/** Calls `onTap` when a dose reminder is tapped, including the tap that cold-started the app. */
+/** Calls `onTap` when a dose/snooze reminder body is tapped, including cold start. */
 export function subscribeToReminderTaps(onTap: () => void): () => void {
-  const isDoseTap = (response: Notifications.NotificationResponse | null) =>
+  const isBodyTap = (response: Notifications.NotificationResponse | null) =>
     !!response &&
     response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER &&
-    response.notification.request.identifier.startsWith(DOSE_NAMESPACE);
+    (response.notification.request.identifier.startsWith(DOSE_NAMESPACE) ||
+      response.notification.request.identifier.startsWith(SNOOZE_NAMESPACE));
 
   const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-    if (isDoseTap(response)) onTap();
+    if (isBodyTap(response)) onTap();
   });
   const coldStart = Notifications.getLastNotificationResponse();
-  if (isDoseTap(coldStart)) {
+  if (isBodyTap(coldStart)) {
     Notifications.clearLastNotificationResponse();
     onTap();
   }

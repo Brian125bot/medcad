@@ -19,6 +19,7 @@ import {
   parseSlotTime,
   shiftCivil,
 } from './fire-time';
+import { buildDoseKey } from '../schedule/doses';
 import {
   DOSE_NAMESPACE,
   MAX_PENDING_NOTIFICATIONS,
@@ -42,6 +43,8 @@ export interface PlanInput {
   now: CivilNow;
   horizonDays?: number;
   budget?: number;
+  /** Doses with an active snooze; skip scheduling `cx.dose.` for them (COR-77). */
+  snoozedDoseKeys?: ReadonlySet<string>;
 }
 
 /** Inclusive dose-date range the planner reads logs for. */
@@ -81,6 +84,8 @@ export function planNotifications(input: PlanInput): NotificationPlan {
     const dateKey = addDaysToKey(todayKey, offset);
     for (const dose of getScheduledDosesForDate(active, input.logs, dateKey, todayKey)) {
       if (dose.slot.reminderEnabled === false || dose.log) continue;
+      const doseKey = buildDoseKey(dateKey, dose.medication.id, dose.slot.id);
+      if (input.snoozedDoseKeys?.has(doseKey)) continue;
       const doseMinuteOfDay = parseSlotTime(dose.slot.time);
       const lead = getEffectiveLeadMinutes(dose.slot.leadMinutes, input.settings.defaultLeadMinutes);
       const fireAt = computeFireInstant(dateKey, doseMinuteOfDay, lead);

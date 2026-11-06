@@ -7,8 +7,10 @@
  * `cx.dose.`, never throws to callers.
  */
 import type { RepositoryChange } from '../storage/context';
+import { computeTodayPendingBadgeCount } from './badge-count';
 import { buildReminderContent, hashReminderContent } from './content';
 import { planNotifications, planningDateRange } from './planner';
+import { collectSnoozedDoseKeys } from './snooze';
 import type {
   ClockPort,
   NotificationPermission,
@@ -121,11 +123,19 @@ export class ReminderEngine {
         // The vault is gone: do not read it, just drop every dose reminder.
         this.vaultWipePending = false;
         await this.cancelDoseNamespace();
+        await scheduler.setBadgeCount(0);
         this.setStatus({ ...INITIAL_REMINDER_STATUS, lastReconciledAt: clock.nowIso() });
         return;
       }
 
       if ((await permissions.getStatus()) !== 'granted') {
+        const now = clock.now();
+        const [medications, todayEntries] = await Promise.all([
+          repository.getAllMedications(),
+          repository.getDoseLogsInRange(now.todayKey, now.todayKey),
+        ]);
+        const todayLogs = Object.fromEntries(todayEntries.map((entry) => [entry.key, entry]));
+        await scheduler.setBadgeCount(computeTodayPendingBadgeCount(medications, todayLogs, now.todayKey));
         this.setStatus({ state: 'permission-denied', lastReconciledAt: clock.nowIso(), scheduledCount: 0, truncated: false });
         return;
       }
@@ -136,7 +146,11 @@ export class ReminderEngine {
       const exact = exactStatus !== 'denied';
 
       await scheduler.ensureChannels();
+      await scheduler.ensureActionCategories();
       const now = clock.now();
+      const nowMs = clock.toEpochMs(now.todayKey, now.minuteOfDay);
+      const scheduledBefore = await scheduler.listScheduled();
+      const snoozedDoseKeys = collectSnoozedDoseKeys(scheduledBefore, nowMs);
       const { startKey, endKey } = planningDateRange(now.todayKey);
       const [medications, settings, entries] = await Promise.all([
         repository.getAllMedications(),
@@ -144,7 +158,7 @@ export class ReminderEngine {
         repository.getDoseLogsInRange(startKey, endKey),
       ]);
       const logs = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
-      const plan = planNotifications({ medications, logs, settings, now });
+      const plan = planNotifications({ medications, logs, settings, now, snoozedDoseKeys });
 
       const desired = new Map<string, ReminderScheduleRequest & { hash: string }>();
       for (const notification of plan.notifications) {
@@ -170,6 +184,11 @@ export class ReminderEngine {
       for (const { hash: _hash, ...request } of desired.values()) {
         if (!unchanged.has(request.id)) await scheduler.schedule(request);
       }
+
+      const todayEntries = await repository.getDoseLogsInRange(now.todayKey, now.todayKey);
+      const todayLogs = Object.fromEntries(todayEntries.map((entry) => [entry.key, entry]));
+      const badgeCount = computeTodayPendingBadgeCount(medications, todayLogs, now.todayKey);
+      await scheduler.setBadgeCount(badgeCount);
 
       this.setStatus({
         state: exactStatus === 'denied' ? 'exact-alarm-denied' : 'ok',
