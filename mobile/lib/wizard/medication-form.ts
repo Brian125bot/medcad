@@ -19,6 +19,7 @@ import {
   type TimeSlot,
 } from '../domain/medication-data';
 import { isValidDateKey } from '../schedule/date-keys';
+import { refreshNextFillDate } from '../schedule/fill-date';
 
 // Appearance types live in the domain (they are persisted); re-exported so
 // existing wizard imports keep working.
@@ -326,6 +327,8 @@ export interface FormToMedicationOptions {
   newId: () => string;
   /** When editing, the persisted medication: its id and non-wizard fields are preserved. */
   existing?: Medication;
+  /** Civil `YYYY-MM-DD` date used for the fill-date projection. */
+  todayKey: string;
 }
 
 /**
@@ -334,6 +337,9 @@ export interface FormToMedicationOptions {
  * record (e.g. an invalid `startDate`).
  */
 export function formToMedication(state: MedicationFormState, options: FormToMedicationOptions): Medication {
+  if (!isValidDateKey(options.todayKey)) {
+    throw new RangeError(`Invalid today key: ${options.todayKey}`);
+  }
   const errors = validateForm(state);
   if (Object.keys(errors).length > 0) throw new MedicationFormInvalidError(errors);
   const { existing, newId } = options;
@@ -383,7 +389,10 @@ export function formToMedication(state: MedicationFormState, options: FormToMedi
   if (existing?.inventory.googleCalendarEventId) {
     med.inventory.googleCalendarEventId = existing.inventory.googleCalendarEventId;
   }
-  return med;
+  if (existing?.inventory.calendarSyncedFillDate) {
+    med.inventory.calendarSyncedFillDate = existing.inventory.calendarSyncedFillDate;
+  }
+  return refreshNextFillDate({ previous: existing ?? null, next: med, todayKey: options.todayKey });
 }
 
 /**

@@ -5,6 +5,7 @@ import { memoryKeystore, nodeCipher, nodeSqlDriver, VaultIntegrityError } from '
 import type { Medication } from '../lib/domain/medication-data';
 import { addDaysToKey, getScheduledDosesForDate, isDoseSlotSnapshot, toDateKey } from '../lib/domain/medication-data';
 import { computeAdherenceAnalytics } from '../lib/schedule/analytics';
+import { isCalendarEventStale } from '../lib/schedule/fill-date';
 
 console.log('=== repository.test ===');
 
@@ -63,6 +64,25 @@ async function main() {
   assert.strictEqual((await repository.getMedicationById('med-1'))?.appearance, undefined);
   await repository.deleteMedication('med-styled');
 
+  // COR-94: the calendar-sync marker round-trips inside the encrypted payload only.
+  const synced: Medication = {
+    ...medication,
+    id: 'med-synced',
+    inventory: {
+      ...medication.inventory,
+      nextFillDate: '2026-11-05',
+      googleCalendarEventId: 'evt-1',
+      calendarSyncedFillDate: '2026-11-01',
+    },
+  };
+  await repository.saveMedication(synced);
+  const reloadedSynced = (await repository.getMedicationById('med-synced'))!;
+  assert.strictEqual(reloadedSynced.inventory.calendarSyncedFillDate, '2026-11-01');
+  const rawSynced = await driver.all<Record<string, unknown>>("SELECT * FROM medications WHERE id = 'med-synced'");
+  assert.ok(!('calendar_synced_fill_date' in rawSynced[0]));
+  assert.ok(!JSON.stringify(rawSynced[0]).includes('2026-11-01'), 'calendarSyncedFillDate must stay sealed');
+  await repository.deleteMedication('med-synced');
+
   const updated: Medication = { ...medication, timeSlots: [medication.timeSlots[0]], name: 'Lisinopril HD' };
   await repository.saveMedication(updated);
   assert.strictEqual((await repository.getMedicationById('med-1'))?.name, 'Lisinopril HD');
@@ -92,7 +112,7 @@ async function main() {
   await repository.setPreference('theme', 'dark');
   assert.strictEqual(await repository.getPreference('theme', 'system'), 'dark');
 
-  assert.strictEqual((await repository.toggleActiveMedication('med-1'))?.active, false);
+  assert.strictEqual((await repository.toggleActiveMedication('med-1', '2026-10-16'))?.active, false);
   assert.strictEqual((await repository.refillMedication('med-1', 5, '2026-10-15', 'CVS'))?.inventory.currentUnits, 15);
   assert.strictEqual((await repository.refillMedication('med-1', 5, '2026-10-15', 'CVS'))?.inventory.pharmacyNote, 'CVS');
 
@@ -140,6 +160,101 @@ async function main() {
     assert.strictEqual(raced.inventory.currentUnits, 25, 'concurrent dose preserved: 23 + 4 - 2');
     assert.strictEqual((await repository.getMedicationById('med-1'))!.inventory.currentUnits, 25);
     off();
+  }
+
+  // COR-94: refill and pause/resume are supply edits; logDose is not.
+  {
+    const fillBase: Medication = {
+      ...medication,
+      id: 'med-fill',
+      name: 'Fill Test',
+      frequency: 'daily',
+      daysOfWeek: undefined,
+      intervalDays: undefined,
+      timeSlots: [{ id: 'slot-fill', label: 'Morning', time: '08:00', doseUnits: 1 }],
+      inventory: {
+        currentUnits: 7,
+        capacityUnits: 30,
+        lowThresholdUnits: 5,
+        lastRefilledAt: '2026-09-30',
+        nextFillDate: '2026-10-21',
+        googleCalendarEventId: 'evt-fill',
+        calendarSyncedFillDate: '2026-10-21',
+      },
+      active: true,
+    };
+    await repository.saveMedication(fillBase);
+    const refilledFill = (await repository.refillMedication('med-fill', 10, '2026-10-16'))!;
+    assert.strictEqual(refilledFill.inventory.currentUnits, 17);
+    assert.strictEqual(refilledFill.inventory.nextFillDate, '2026-10-31');
+    assert.strictEqual(isCalendarEventStale(refilledFill.inventory), true, 'linked event is stale after the date moves');
+
+    const fillNow = (await repository.getMedicationById('med-fill'))!;
+    await repository.saveMedication({
+      ...fillNow,
+      inventory: { ...fillNow.inventory, calendarSyncedFillDate: fillNow.inventory.nextFillDate },
+    });
+    assert.strictEqual(isCalendarEventStale((await repository.getMedicationById('med-fill'))!.inventory), false);
+
+    // A refill that does not change the projection leaves even a drifted stored date alone.
+    await repository.saveMedication({
+      ...fillBase,
+      id: 'med-fill-same',
+      inventory: { ...fillBase.inventory, currentUnits: 7.5, nextFillDate: '2026-10-22', googleCalendarEventId: undefined, calendarSyncedFillDate: undefined },
+    });
+    const sameRefill = (await repository.refillMedication('med-fill-same', 0.4, '2026-10-16'))!;
+    assert.strictEqual(sameRefill.inventory.currentUnits, 7.9);
+    assert.strictEqual(sameRefill.inventory.nextFillDate, '2026-10-22');
+
+    // The date is projected from the stock the refill read; a concurrent dose still survives.
+    await repository.saveMedication({
+      ...fillBase,
+      id: 'med-fill-race',
+      inventory: { ...fillBase.inventory, currentUnits: 7, nextFillDate: '2026-10-21', googleCalendarEventId: undefined, calendarSyncedFillDate: undefined },
+    });
+    const originalFillRead = repository.getMedicationById.bind(repository);
+    let fillInjected = false;
+    repository.getMedicationById = async (id: string, driver?: Parameters<typeof repository.getMedicationById>[1]) => {
+      const med = await originalFillRead(id, driver as never);
+      if (!fillInjected && id === 'med-fill-race') {
+        fillInjected = true;
+        await repository.logDose('2026-10-16', 'med-fill-race', 'slot-fill', 'taken');
+      }
+      return med;
+    };
+    const racedFill = (await repository.refillMedication('med-fill-race', 4, '2026-10-16'))!;
+    repository.getMedicationById = originalFillRead;
+    assert.strictEqual(racedFill.inventory.currentUnits, 10, 'concurrent dose preserved: 7 + 4 - 1');
+    assert.strictEqual(racedFill.inventory.nextFillDate, '2026-10-25', 'date projected from the refill-read stock');
+
+    await repository.saveMedication({
+      ...fillBase,
+      id: 'med-fill-active',
+      inventory: { ...fillBase.inventory, currentUnits: 7, nextFillDate: '2026-10-21' },
+    });
+    const fillEvents: string[] = [];
+    const offFill = repository.subscribe((change) => {
+      if (change.type === 'medication-saved' && change.medicationId === 'med-fill-active') fillEvents.push(change.medicationId);
+    });
+    fillEvents.length = 0;
+    const paused = (await repository.toggleActiveMedication('med-fill-active', '2026-10-16'))!;
+    assert.strictEqual(paused.active, false);
+    assert.strictEqual(paused.inventory.nextFillDate, undefined);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(paused.inventory, 'nextFillDate'), false);
+    const resumed = (await repository.toggleActiveMedication('med-fill-active', '2026-10-16'))!;
+    assert.strictEqual(resumed.active, true);
+    assert.strictEqual(resumed.inventory.nextFillDate, '2026-10-21');
+    assert.strictEqual(fillEvents.length, 2, 'one medication-saved per pause/resume');
+
+    const beforeBadToggle = (await repository.getMedicationById('med-fill-active'))!;
+    const eventsBeforeBad = fillEvents.length;
+    await assert.rejects(() => repository.toggleActiveMedication('med-fill-active', '2026-13-01'), RangeError);
+    const afterBadToggle = (await repository.getMedicationById('med-fill-active'))!;
+    assert.strictEqual(afterBadToggle.active, beforeBadToggle.active);
+    assert.strictEqual(afterBadToggle.inventory.currentUnits, beforeBadToggle.inventory.currentUnits);
+    assert.strictEqual(afterBadToggle.inventory.nextFillDate, beforeBadToggle.inventory.nextFillDate);
+    assert.strictEqual(fillEvents.length, eventsBeforeBad, 'invalid toggle date writes nothing');
+    offFill();
   }
 
   const info = await repository.getStorageEngineInfo();

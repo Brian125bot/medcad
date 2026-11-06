@@ -55,6 +55,7 @@ const existing: Medication = {
     nextFillDate: '2026-10-20',
     pharmacyNote: 'CVS',
     googleCalendarEventId: 'evt',
+    calendarSyncedFillDate: '2026-10-20',
   },
   active: false,
 };
@@ -197,7 +198,7 @@ describe('inventory warnings (non-blocking)', () => {
   it('saves a fractional on-hand count after logDose (29.5 / 30)', () => {
     const form = medicationToForm({ ...existing, inventory: { ...existing.inventory, currentUnits: 29.5, lowThresholdUnits: 2.5 } }, TODAY);
     expect(form.currentUnits).toBe('29.5');
-    const med = formToMedication(form, { newId: ids(), existing });
+    const med = formToMedication(form, { newId: ids(), existing, todayKey: TODAY });
     expect(med.inventory.currentUnits).toBe(29.5);
     expect(med.inventory.lowThresholdUnits).toBe(2.5);
   });
@@ -206,7 +207,7 @@ describe('inventory warnings (non-blocking)', () => {
     const form = medicationToForm({ ...existing, inventory: { ...existing.inventory, currentUnits: 55, capacityUnits: 30 } }, TODAY);
     expect(validateForm(form)).toEqual({});
     expect(inventoryWarnings(form).currentUnits).toBeDefined();
-    expect(formToMedication(form, { newId: ids(), existing }).inventory.currentUnits).toBe(55);
+    expect(formToMedication(form, { newId: ids(), existing, todayKey: TODAY }).inventory.currentUnits).toBe(55);
   });
 });
 
@@ -221,7 +222,7 @@ describe('formToMedication', () => {
         ],
         pharmacyNote: '',
       }),
-      { newId: ids() },
+      { newId: ids(), todayKey: TODAY },
     );
     expect(med.id).toBe('uuid-3');
     expect(med.name).toBe('Atorvastatin');
@@ -235,7 +236,7 @@ describe('formToMedication', () => {
       { id: 'uuid-1', label: 'Morning', time: '08:00', doseUnits: 0.5, reminderEnabled: false },
       { id: 'uuid-2', label: 'Evening', time: '20:00', doseUnits: 2, reminderEnabled: true, leadMinutes: 15 },
     ]);
-    expect(med.inventory).toEqual({ currentUnits: 30, capacityUnits: 30, lowThresholdUnits: 5, lastRefilledAt: TODAY });
+    expect(med.inventory).toEqual({ currentUnits: 30, capacityUnits: 30, lowThresholdUnits: 5, lastRefilledAt: TODAY, nextFillDate: '2026-10-26' });
     expect(med.startDate).toBe(TODAY);
     expect(med.appearance).toEqual(DEFAULT_PILL_APPEARANCE);
   });
@@ -247,7 +248,7 @@ describe('formToMedication', () => {
         currentUnits: '29,5',
         lowThresholdUnits: ',5',
       }),
-      { newId: ids() },
+      { newId: ids(), todayKey: TODAY },
     );
     expect(med.timeSlots[0].doseUnits).toBe(1.5);
     expect(med.inventory.currentUnits).toBe(29.5);
@@ -256,7 +257,7 @@ describe('formToMedication', () => {
 
   it('persists the pill look the user picked (a copy, not the form object)', () => {
     const appearance = { shape: 'oval' as const, primaryColor: '#fca5a5', secondaryColor: '#0f172a' };
-    const med = formToMedication(validForm({ appearance }), { newId: ids() });
+    const med = formToMedication(validForm({ appearance }), { newId: ids(), todayKey: TODAY });
     expect(med.appearance).toEqual(appearance);
     expect(med.appearance).not.toBe(appearance);
   });
@@ -265,22 +266,22 @@ describe('formToMedication', () => {
     const appearance = { shape: 'capsule' as const, primaryColor: '#93c5fd', secondaryColor: '#fdba74' };
     const form = medicationToForm({ ...existing, appearance }, TODAY);
     expect(form.appearance).toEqual(appearance);
-    expect(formToMedication(form, { newId: ids(), existing: { ...existing, appearance } }).appearance).toEqual(appearance);
+    expect(formToMedication(form, { newId: ids(), existing: { ...existing, appearance }, todayKey: TODAY }).appearance).toEqual(appearance);
     // No stored look (saved before the pill builder) -> default; an explicit override still wins.
     expect(medicationToForm(existing, TODAY).appearance).toEqual(DEFAULT_PILL_APPEARANCE);
     expect(medicationToForm({ ...existing, appearance }, TODAY, DEFAULT_PILL_APPEARANCE).appearance).toEqual(DEFAULT_PILL_APPEARANCE);
   });
 
   it('maps specific days (deduped, sorted) and interval', () => {
-    expect(formToMedication(validForm({ frequency: 'specific_days', daysOfWeek: [5, 1, 5] }), { newId: ids() }).daysOfWeek).toEqual([1, 5]);
-    expect(formToMedication(validForm({ frequency: 'specific_days', daysOfWeek: [6, 0, 3] }), { newId: ids() }).daysOfWeek).toEqual([0, 3, 6]);
-    expect(formToMedication(validForm({ frequency: 'interval', intervalDays: '3' }), { newId: ids() }).intervalDays).toBe(3);
+    expect(formToMedication(validForm({ frequency: 'specific_days', daysOfWeek: [5, 1, 5] }), { newId: ids(), todayKey: TODAY }).daysOfWeek).toEqual([1, 5]);
+    expect(formToMedication(validForm({ frequency: 'specific_days', daysOfWeek: [6, 0, 3] }), { newId: ids(), todayKey: TODAY }).daysOfWeek).toEqual([0, 3, 6]);
+    expect(formToMedication(validForm({ frequency: 'interval', intervalDays: '3' }), { newId: ids(), todayKey: TODAY }).intervalDays).toBe(3);
   });
 
   it('never persists a corrupt record', () => {
-    expect(() => formToMedication(validForm({ startDate: '2026-02-30' }), { newId: ids() })).toThrow(MedicationFormInvalidError);
+    expect(() => formToMedication(validForm({ startDate: '2026-02-30' }), { newId: ids(), todayKey: TODAY })).toThrow(MedicationFormInvalidError);
     try {
-      formToMedication(validForm({ name: 'Secret Drug', strength: '' }), { newId: ids() });
+      formToMedication(validForm({ name: 'Secret Drug', strength: '' }), { newId: ids(), todayKey: TODAY });
     } catch (err) {
       const e = err as MedicationFormInvalidError;
       expect(e.errors.strength).toBeDefined();
@@ -295,7 +296,7 @@ describe('formToMedication', () => {
     expect(form.timeSlots[1].leadMinutes).toBe('');
     expect(form.timeSlots[1].reminderEnabled).toBe(true);
     form.timeSlots.push({ time: '12:00', doseUnits: '1', leadMinutes: '', reminderEnabled: true });
-    const med = formToMedication(form, { newId: ids(), existing });
+    const med = formToMedication(form, { newId: ids(), existing, todayKey: TODAY });
     expect(med.id).toBe(existing.id);
     expect(med.timeSlots.map((s) => s.id)).toEqual(['slot-keep', 'uuid-1', 'slot-2']);
     expect(med.timeSlots[0].leadMinutes).toBe(0);
@@ -304,6 +305,43 @@ describe('formToMedication', () => {
       active: false, daysOfWeek: [1, 3], startDate: '2026-01-05',
     });
     expect(med.inventory).toEqual(existing.inventory);
+  });
+
+  it('refreshes the fill date on supply edits and leaves time-only edits alone', () => {
+    const dailyExisting: Medication = {
+      ...existing,
+      id: 'med-daily',
+      active: true,
+      frequency: 'daily',
+      daysOfWeek: undefined,
+      intervalDays: undefined,
+      timeSlots: [{ id: 'slot-daily', label: 'Morning', time: '08:00', doseUnits: 1 }],
+      inventory: {
+        currentUnits: 7,
+        capacityUnits: 30,
+        lowThresholdUnits: 5,
+        lastRefilledAt: '2026-09-30',
+        nextFillDate: '2026-10-21',
+        googleCalendarEventId: 'gcal-daily',
+        calendarSyncedFillDate: '2026-10-21',
+      },
+    };
+    const stockForm = medicationToForm(dailyExisting, TODAY);
+    const stockEdit = formToMedication({ ...stockForm, currentUnits: '10' }, { newId: ids(), existing: dailyExisting, todayKey: TODAY });
+    expect(stockEdit.inventory.nextFillDate).toBe('2026-10-24');
+    expect(stockEdit.inventory.googleCalendarEventId).toBe('gcal-daily');
+    expect(stockEdit.inventory.calendarSyncedFillDate).toBe('2026-10-21');
+
+    const timeForm = medicationToForm(dailyExisting, TODAY);
+    const timeEdit = formToMedication(
+      { ...timeForm, timeSlots: [{ ...timeForm.timeSlots[0], time: '09:00' }] },
+      { newId: ids(), existing: dailyExisting, todayKey: TODAY },
+    );
+    expect(timeEdit.inventory).toEqual(dailyExisting.inventory);
+  });
+
+  it('requires a valid civil todayKey before building a medication', () => {
+    expect(() => formToMedication(validForm(), { newId: ids(), todayKey: '2026-13-01' })).toThrow(RangeError);
   });
 
   it('sanitizes corrupt stored values when editing', () => {
@@ -318,11 +356,11 @@ describe('formToMedication', () => {
     );
     expect(form).toMatchObject({ form: '', startDate: TODAY, lastRefilledAt: TODAY, daysOfWeek: [], intervalDays: '2', genericName: '', pharmacyNote: '' });
     expect(form.appearance.shape).toBe('capsule');
-    const med = formToMedication({ ...form, form: 'Tablet' }, { newId: ids(), existing: { ...existing, prescriber: undefined, inventory: { ...existing.inventory, nextFillDate: undefined, googleCalendarEventId: undefined } } });
+    const med = formToMedication({ ...form, form: 'Tablet' }, { newId: ids(), existing: { ...existing, prescriber: undefined, inventory: { ...existing.inventory, nextFillDate: undefined, googleCalendarEventId: undefined } }, todayKey: TODAY });
     expect(med.prescriber).toBeUndefined();
     expect(med.inventory.nextFillDate).toBeUndefined();
     expect(med.inventory.googleCalendarEventId).toBeUndefined();
-    const fresh = formToMedication(validForm(), { newId: ids(), existing: { ...existing, purpose: undefined as never, instructions: undefined as never, active: undefined as never } });
+    const fresh = formToMedication(validForm(), { newId: ids(), existing: { ...existing, purpose: undefined as never, instructions: undefined as never, active: undefined as never }, todayKey: TODAY });
     expect(fresh.purpose).toBe('');
     expect(fresh.active).toBe(true);
   });
