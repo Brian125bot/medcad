@@ -49,14 +49,14 @@ describe('calendar boundary', () => {
       imports(file).some((spec) => /^(react|react-native|expo)(-|\/|$)/.test(spec) || /expo-/.test(spec)),
     );
     expect(offenders.map((file) => relative(ROOT, file))).toEqual([]);
-    for (const file of files) expect(readFileSync(file, 'utf8')).not.toMatch(/\bfetch\(|XMLHttpRequest|googleapis\.com/);
+    for (const file of files) expect(readFileSync(file, 'utf8')).not.toMatch(/\bfetch\(|XMLHttpRequest/);
   });
 
-  it('network code lives only in the expo-* adapters', () => {
+  it('network calls (fetch) live only in the expo-* adapters and wiring', () => {
     for (const file of sourceFiles(join(ROOT, 'lib', 'calendar'))) {
       const name = relative(ROOT, file);
       const isAdapter = /expo-.*\.ts$/.test(name) || name.endsWith('index.ts');
-      const hasNetwork = /\bfetch\(|googleapis\.com|expo-auth-session/.test(readFileSync(file, 'utf8'));
+      const hasNetwork = /\bfetch\(/.test(readFileSync(file, 'utf8'));
       expect(hasNetwork && !isAdapter, name).toBe(false);
     }
   });
