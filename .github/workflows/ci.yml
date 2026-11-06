@@ -1,0 +1,62 @@
+# CI for the CadenceRx mobile app (mobile/). Mirrors the local gate in
+# mobile/docs/development.md. No secrets are used.
+#
+# The root Next.js prototype is not a job: on Node 22 its check, lint and test
+# scripts fail, and it has no npm lockfile.
+#
+# Actions are pinned to commit SHAs. The release tag is only a comment, so a
+# moved tag cannot change this workflow.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: mobile (typecheck, lint, tests, export)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: mobile/.nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck (app)
+        run: npx tsc --noEmit
+
+      - name: Typecheck (storage / tests project)
+        run: npm run typecheck:storage
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests (storage suites + vitest with 100% coverage gate)
+        run: npm test
+
+      - name: Timezone matrix
+        run: npm run test:tz
+
+      - name: Expo export (iOS, Android, web)
+        run: npx expo export --platform all
+        env:
+          CI: "1"
+          EXPO_NO_TELEMETRY: "1"

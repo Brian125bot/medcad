@@ -43,9 +43,11 @@ npx tsc --noEmit && npm run typecheck:storage && npm run lint && npm test   # th
   encrypted at rest; never log them; use obviously fake data in tests.
 - **Dates are strings.** A day is a local `YYYY-MM-DD` key, never an instant;
   there is no hidden clock — callers pass `todayKey`.
-- **There is no CI.** The local gate above is the only check.
+- **CI** (`.github/workflows/ci.yml`, COR-87) runs the same gate plus `test:tz`
+  and `expo export` on every PR and push to `main` (`ubuntu-24.04`, Node 22).
+  Run the gate locally first anyway. The web prototype is not in CI.
 - **Device QA is still pending** (COR-88, COR-91). Bundling works after COR-90;
-  tests, typecheck and lint are the local gate until CI exists.
+  tests, typecheck and lint run locally and in CI. CI is not a device run.
 
 ## When you change X, update Y
 

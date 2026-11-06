@@ -26,6 +26,16 @@ the issue id and PR number where there are any.
 ## [Unreleased]
 
 ### Added
+- **CI (COR-87):** GitHub Actions workflow `.github/workflows/ci.yml` for `mobile/`.
+  Runs on pull requests and pushes to `main`, on `ubuntu-24.04`, Node 22 from
+  `mobile/.nvmrc` (npm cache, read-only permissions, superseded runs cancelled,
+  no secrets): `npm ci`, `tsc --noEmit`, `typecheck:storage`, lint, `npm test`
+  (100 % coverage gate), `test:tz`, `expo export --platform all`. Actions are
+  pinned to commit SHAs. The root web prototype is not included (its `check` /
+  `lint` / `test` scripts fail today and it has no npm lockfile). This does not
+  replace device QA and it does not produce storage benchmark numbers.
+- **[mobile]** `"engines": { "node": ">=22.13" }` and `mobile/.nvmrc` (`22`).
+  The storage tests need `node:sqlite`, which ships unflagged from Node 22.13.
 - **[mobile]** COR-77 interactive lock-screen dose actions (not
   device-tested): `dose_reminder` category with Take, Snooze 15m, and Skip;
   background handler writes via `MedicationRepository.logDose`, schedules
