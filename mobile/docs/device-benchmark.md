@@ -6,6 +6,8 @@ No device numbers have been recorded yet. Until someone runs this on hardware
 and pastes the result into COR-88, the desktop figures in
 [storage.md](storage.md#latency-benchmark-local-developer-machine--not-ci-not-device)
 remain the only numbers there are, and they are **not** device evidence.
+The run sheet for the hardware run (commands, protocol, what to paste where)
+is [cor-88-device-run-package.md](cor-88-device-run-package.md).
 
 | Piece | Where |
 | --- | --- |
@@ -28,9 +30,11 @@ Each run starts from an empty benchmark vault, provisions a key + canary
 | D | `repository.logDose(…, 'taken')` on a pending dose + `computeAdherenceAnalytics` (the 30-day adherence and streak function the Today screen uses) | 16 / 50 | Avg of warm runs |
 
 Between the two limits a scenario is **WARN**. Timings use `performance.now()`.
-It also runs the existing COR-71 `repository.runBenchmark()` once per run and
-reports single-write p50/p95, read p50 and 5-row batch p50 against the original
-`< 15 ms` write target (judged on p95).
+It also calls the existing COR-71 `repository.runBenchmark()` 10 times per run
+(40 samples with 1 cold + 3 warm runs) and reports, for the single encrypted
+write, the indexed read and the 5-row encrypted batch: the cold run's first
+sample, the warm average, and p50 / p95 / max over every sample. The original
+`< 15 ms` write target is judged on the single-write **p95**.
 
 Integrity checks (any failure makes the overall result **FAIL**):
 
@@ -50,10 +54,14 @@ Integrity checks (any failure makes the overall result **FAIL**):
 
 **Copy Benchmark Results** produces Brian's COR-88 template: *1. Hardware &
 Environment*, *2. Benchmark Telemetry Results* (Cold / Avg Warm / target /
-status per operation), *3. Cryptographic & Data Integrity Verification* (each
+status per operation, then the `runBenchmark()` p50 / p95 table and a
+`write target met / not met` line), *3. Cryptographic & Data Integrity Verification* (each
 box is ticked only if that check passed in this run) and *4. Milestone
 Sign-Off*, which never claims M1 is complete: sign-off is left pending Brian's
-review. The JSON report is appended in a collapsed block.
+review. The JSON report (`cadencerx.cor88.device-benchmark/v2`) is appended in a
+collapsed block. Section 1 includes a **Build** line (`debug` / `release`, from
+`__DEV__`; only release figures are quotable) and a *Battery / Power Mode* line
+to fill in by hand.
 
 The second integrity box is worded as "sensitive fields unreadable without the
 key" because COR-71 encrypts fields, not the file. The first box's scan covers
@@ -64,7 +72,8 @@ app sandbox.
 
 On the same screen, **Run Storage Diagnostics**:
 
-1. Reads the **app's real vault**, read-only: `getStorageEngineInfo()`, whether a
+1. Prints the device / build line, then reads the **app's real vault**, read-only:
+   `getStorageEngineInfo()` (also printed in full as JSON: counts, versions and status only), whether a
    vault key exists in SecureStore (yes/no, never the key), whether the canary
    row exists and verifies (`validateVault()`), `schema_versions` /
    `PRAGMA user_version`, and row counts. Nothing is decrypted or written.
@@ -105,6 +114,8 @@ architectures and whether it is a physical device. App version comes from
 evidence in the Markdown.
 
 ## Running it on a device
+
+Full run sheet: [cor-88-device-run-package.md](cor-88-device-run-package.md).
 
 Needs a development build (Expo Go is not enough: `expo-device`,
 `expo-clipboard`, `expo-secure-store` and the datetime picker are native

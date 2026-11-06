@@ -56,6 +56,21 @@ the issue id and PR number where there are any.
   `deleteVault()` recovery check that runs only on the isolated benchmark vault;
   Copy Diagnostics button. The benchmark Markdown now follows the COR-88 report
   template (sign-off left pending review). *(COR-88)*
+- **[mobile]** COR-88 device-run package
+  [`cor-88-device-run-package.md`](mobile/docs/cor-88-device-run-package.md):
+  build commands, per-platform protocol, optional file-level on-disk grep,
+  what to paste into Linear and which docs to update. Still no device numbers.
+  *(COR-88)*
+
+### Changed
+- **[mobile]** COR-88 benchmark report (schema `cadencerx.cor88.device-benchmark/v2`):
+  `repository.runBenchmark()` now runs 10× per run (40 samples) and the report
+  gives cold, avg warm, p50, p95 and max for the single write, read and 5-row
+  batch (v1 had read / batch p50 only and p95 over 4 samples); the `< 15 ms`
+  verdict is on single-write p95. Report and diagnostics carry a **Build**
+  line (`debug` / `release` from `__DEV__`), the report a hand-filled
+  battery / power-mode line, and diagnostics the device line and the full
+  `getStorageEngineInfo()` JSON. *(COR-88)*
 
 ### Fixed
 - **[mobile]** Dose history survives removing a dose time or deleting a
