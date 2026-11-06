@@ -66,6 +66,7 @@ export {
   MAX_REFILL_UNITS,
   NO_CONSUMPTION_DAYS,
 } from './supply';
+export { isCalendarEventStale, recommendedFillDate, refreshNextFillDate } from './fill-date';
 export { computeAdherenceAnalytics, MAX_STREAK_LOOKBACK_DAYS } from './analytics';
 export type {
   AdherenceAnalyticsSummary,
