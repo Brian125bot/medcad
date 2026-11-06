@@ -186,6 +186,7 @@ async function encryptMedicationRow(
   const pharmacyNote =
     (row as { inventory_pharmacy_note?: string | null }).inventory_pharmacy_note ?? null;
   const appearance = (row as { appearance?: unknown }).appearance ?? null;
+  const alert = (row as { alert?: unknown }).alert ?? null;
   const phi = {
     name: typeof name === 'string' ? name : String(name ?? ''),
     generic_name: genericName,
@@ -196,6 +197,7 @@ async function encryptMedicationRow(
     prescriber,
     inventory_pharmacy_note: pharmacyNote,
     appearance,
+    alert,
   };
   return {
     id: row.id,
@@ -343,13 +345,46 @@ interface KeyringState {
   promise: Promise<Uint8Array> | null;
 }
 
+/**
+ * COR-76: emitted once after a mutation commits. Listeners run synchronously
+ * after the write and cannot affect it; a throwing listener is logged and ignored.
+ */
+export type RepositoryChange =
+  | { type: 'medication-saved'; medicationId: string }
+  | { type: 'medication-deleted'; medicationId: string }
+  | { type: 'dose-changed'; dateKey: string; medicationId: string; slotId: string }
+  | { type: 'preference-changed'; prefKey: string }
+  | { type: 'vault-deleted' };
+
+export type RepositoryListener = (change: RepositoryChange) => void;
+
 export class MedicationRepository {
   private readonly keyringState: KeyringState = { key: null, promise: null };
+  private readonly listeners = new Set<RepositoryListener>();
   private readyPromise: Promise<void> | null = null;
   private lastWriteLatencyMs = 0;
   private initialized = false;
 
   constructor(private readonly platform: StoragePlatform) {}
+
+  /** Subscribe to post-commit changes. Returns an unsubscribe function. */
+  public subscribe(listener: RepositoryListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Notify listeners after a commit. Internal to the storage layer (also used by `deleteVault`). */
+  public emitChange(change: RepositoryChange): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(change);
+      } catch (error) {
+        console.warn('[storage] change listener failed', error);
+      }
+    }
+  }
 
   /** For tests only: drop the in-memory key without touching the keystore (simulates app restart). */
   public forgetCachedKeyForTests(): void {
@@ -673,6 +708,7 @@ export class MedicationRepository {
     };
     if (options.inventoryBaseline !== undefined) await this.platform.driver.runExclusive(write);
     else await write();
+    this.emitChange({ type: 'medication-saved', medicationId: med.id });
     return med;
   }
 
@@ -688,6 +724,7 @@ export class MedicationRepository {
       await this.platform.driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
       await this.platform.driver.run('DELETE FROM medications WHERE id = ?', [id]);
     });
+    this.emitChange({ type: 'medication-deleted', medicationId: id });
   }
 
   public async toggleActiveMedication(id: string) {
@@ -838,7 +875,7 @@ export class MedicationRepository {
     const stamp = loggedAt ?? hhMm();
 
     // Single-writer gate: read-modify-write must not interleave (double-tap safety).
-    return this.platform.driver.runExclusive(async () => {
+    const result = await this.platform.driver.runExclusive(async () => {
       await this.ensureReady();
       const key = await this.getKey();
       const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
@@ -917,13 +954,15 @@ export class MedicationRepository {
       };
       return { log, updatedMedication };
     });
+    this.emitChange({ type: 'dose-changed', dateKey, medicationId, slotId });
+    return result;
   }
 
   public async undoDose(dateKey: string, medicationId: string, slotId: string) {
     const { buildDoseKey } = await import('../domain/medication-data');
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
 
-    return this.platform.driver.runExclusive(async () => {
+    const result = await this.platform.driver.runExclusive(async () => {
       await this.ensureReady();
       const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
       const medication = await this.getMedicationById(medicationId);
@@ -949,6 +988,8 @@ export class MedicationRepository {
         existing?.status === 'taken' ? ((await this.getMedicationById(medicationId)) ?? undefined) : medication ?? undefined;
       return { undoneKey: doseKey, updatedMedication };
     });
+    this.emitChange({ type: 'dose-changed', dateKey, medicationId, slotId });
+    return result;
   }
 
   public async bulkSaveDoseLogs(logs: import('../domain/medication-data').DoseLogMap): Promise<void> {
@@ -972,7 +1013,7 @@ export class MedicationRepository {
   ) {
     const { buildDoseKey } = await import('../domain/medication-data');
     const doseKey = buildDoseKey(dateKey, medicationId, slotId);
-    return this.platform.driver.runExclusive(async () => {
+    const result = await this.platform.driver.runExclusive(async () => {
       await this.ensureReady();
       const key = await this.getKey();
       const existing = await this.platform.driver.get<DoseLogRow>('SELECT * FROM dose_logs WHERE id = ?', [doseKey]);
@@ -1011,6 +1052,8 @@ export class MedicationRepository {
       );
       return { logKey: doseKey };
     });
+    this.emitChange({ type: 'dose-changed', dateKey, medicationId, slotId });
+    return result;
   }
 
   public async getPreference<T>(prefKey: string, defaultValue: T): Promise<T> {
@@ -1039,6 +1082,7 @@ export class MedicationRepository {
        ON CONFLICT(pref_key) DO UPDATE SET updated_at=excluded.updated_at, enc_payload=excluded.enc_payload`,
       [row.id, row.pref_key, row.updated_at, row.enc_payload],
     );
+    this.emitChange({ type: 'preference-changed', prefKey });
   }
 
   public async resetSampleData() {
@@ -1250,6 +1294,7 @@ export async function createStorageContext(platform: StoragePlatform): Promise<S
         await platform.driver.run('DELETE FROM user_preferences');
         await platform.driver.run(`DELETE FROM ${VAULT_CANARY_TABLE} WHERE id = ?`, [VAULT_CANARY_ROW_ID]);
       });
+      repository.emitChange({ type: 'vault-deleted' });
     },
     async migrateIfNeeded(options?: { seedTodayKey?: string; allowSeed?: boolean }): Promise<void> {
       await repository.ensureReady();
