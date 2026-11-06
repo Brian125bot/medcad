@@ -72,6 +72,7 @@ export default function RootLayout() {
           <Stack.Screen name="modal" options={{ presentation: "modal" }} />
           <Stack.Screen name="medication/new" options={{ presentation: "modal" }} />
           <Stack.Screen name="medication/[id]" options={{ presentation: "modal" }} />
+          <Stack.Screen name="reminder-settings" options={{ presentation: "modal", title: "Reminders" }} />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

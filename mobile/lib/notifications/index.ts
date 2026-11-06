@@ -6,6 +6,13 @@
 import { AppState, Linking, Platform } from 'react-native';
 
 import type { StorageContext } from '../storage/context';
+import { expoClock } from './expo-clock';
+import {
+  configureForegroundPresentation,
+  createExpoPermissions,
+  createExpoScheduler,
+  subscribeToReminderTaps,
+} from './expo-scheduler';
 import type { NotificationPermission } from './ports';
 import { INITIAL_REMINDER_STATUS, ReminderEngine } from './reconciler';
 import type { ReminderStatus } from './types';
@@ -27,11 +34,6 @@ export function startReminderEngine(
   options: { onOpenToday: () => void },
 ): () => void {
   if (Platform.OS === 'web' || engine) return () => {};
-  // Loaded lazily so web bundles never evaluate the native module.
-  const { configureForegroundPresentation, createExpoPermissions, createExpoScheduler, subscribeToReminderTaps } =
-    require('./expo-scheduler') as typeof import('./expo-scheduler');
-  const { expoClock } = require('./expo-clock') as typeof import('./expo-clock');
-
   configureForegroundPresentation();
   const current = new ReminderEngine({
     repository: context.repository,
