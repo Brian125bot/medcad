@@ -73,6 +73,14 @@ the issue id and PR number where there are any.
   `getStorageEngineInfo()` JSON. *(COR-88)*
 
 ### Fixed
+- **[mobile]** Native storage transactions were not atomic: `withExclusiveTransactionAsync`
+  runs on its own connection, but `expoSqlDriver` sent statements to the main
+  handle, so each auto-committed and rollback did nothing. Statements inside
+  `transaction()` now go through the transaction connection (nested calls join it).
+  Found by the COR-88 emulator smoke test (`atomicRollback` 510 → 1020 rows). *(COR-71, COR-88, #21)*
+- **[mobile]** Android build: notification sound renamed `cadencerx_chime.wav`
+  (Android resource names cannot contain `-`), and `ExactAlarmModule.kt` no longer
+  uses bare `return@Function`, which Kotlin 2 rejects. *(COR-76, #21)*
 - **[mobile]** Dose history survives removing a dose time or deleting a
   medication: every dose log stores a `slotSnapshot` (`time`, `label`,
   `doseUnits`) in its encrypted payload, returned by all dose-log readers.
