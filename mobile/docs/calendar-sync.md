@@ -1,12 +1,12 @@
 # Calendar sync (COR-79)
 
-Status: **part 1 of 2: engine only, inert.** Part 1 adds the sync engine, the
-storage hooks it needs and the app wiring. There is no Google sign-in, no
-network client and no screen yet. The wired auth adapter reports
-`not-configured`, so the engine never calls the API, but it still records
-deletion tombstones so medications deleted before sign-in ships do not leave
-orphaned events later. Part 2 adds Google OAuth (PKCE), the Calendar API
-adapter and the settings screen.
+Status: **both parts landed; not yet verified on a device.** The engine
+(part 1) plans creates, updates and removals from stored state plus deletion
+tombstones; part 2 adds Google OAuth (PKCE), the Calendar API client and the
+settings screen with bulk sync. Until the owner configures Google client ids
+the auth adapter reports `not-configured`, so the engine never calls the API,
+but it still records deletion tombstones so medications deleted before sign-in
+ships do not leave orphaned events later.
 
 ## Decisions
 
@@ -44,8 +44,14 @@ storage commit ──► RepositoryChange ──► CalendarSyncEngine.handleCha
 | `lib/calendar/errors.ts` | Typed API errors and `classifyCalendarError` |
 | `lib/calendar/ports.ts` | `CalendarApiPort`, `AccountStatePort`, `AuthPort`, `CalendarClockPort`, the repository subset |
 | `lib/calendar/engine.ts` | `CalendarSyncEngine` |
-| `lib/calendar/placeholder-adapters.ts` | Inert part-1 adapters (`not-configured` auth) |
-| `lib/calendar/expo-clock.ts`, `index.ts` | Device clock and app wiring (`startCalendarSyncEngine`, `syncNow`, `syncAll`, `disconnect`, `useCalendarSyncStatus`) |
+| `lib/calendar/google-config.ts` | Scope, endpoints, client-id env reads, redirect URIs, auth request plan (pure) |
+| `lib/calendar/google-auth.ts` | Token freshness, scope check, prompt-result and `invalid_grant` mapping (pure) |
+| `lib/calendar/google-api.ts` | Calendar v3 request builders and HTTP/transport error mapping (pure) |
+| `lib/calendar/expo-auth.ts` | `GoogleCalendarAuth`: PKCE sign-in, token refresh, secure token store, `AuthPort` + `AccountStatePort` |
+| `lib/calendar/expo-calendar.ts` | `CalendarApiPort` over `fetch` (15 s timeout, one refresh + retry on 401) |
+| `lib/calendar/placeholder-adapters.ts` | Inert adapters kept for tests |
+| `lib/calendar/expo-clock.ts`, `index.ts` | Device clock and app wiring (`startCalendarSyncEngine`, `connectCalendar`, `syncNow`, `syncAll`, `disconnect`, `useCalendarSyncStatus`) |
+| `app/calendar-sync.tsx`, `components/calendar-sync/BulkSyncModal.tsx` | Settings screen and bulk sync modal; entry is the Cabinet header calendar button |
 
 Screens (`app/`, `components/`, `hooks/`) import only `@/lib/calendar`; ESLint
 and `tests/calendar-boundary.spec.ts` enforce it.
@@ -150,9 +156,16 @@ fingerprint writes) are ignored. The reminder engine ignores every
 - `extendedProperties.private` is `{ cadencerx: '1', med: <medication UUID> }`.
 - Logs carry a fixed message and an error **class name** only: never a
   medication name, a date, an event id, a token or a response body.
-- Part 2 keeps the refresh token and calendar id in `expo-secure-store` under
-  its own keychain service; the access token stays in memory. Nothing token
-  related enters the vault or preferences.
+- The refresh token and calendar id live in `expo-secure-store` under the
+  `cadencerx.calendar` keychain service (`lib/calendar/expo-auth.ts`); the
+  access token stays in memory only. Nothing token related enters the vault,
+  preferences, logs or the clipboard. `signOut` revokes best effort and keeps
+  the calendar id; `disconnect` remove-events clears it through the engine.
+- `reauth-required`: a refresh that fails with `invalid_grant` (Google
+  Testing-mode refresh tokens expire after about a week) deletes the refresh
+  token, sets a `needs-reauth` flag and reports `reauth-required`. The screen
+  shows **Reconnect**; the pass keeps its pending work and resumes after a
+  successful connect. See the owner checklist for the consent-screen setup.
 
 ## Disconnect
 
@@ -174,6 +187,55 @@ on `vault-deleted` the engine calls `deleteCalendar` once, best effort, then
 signs out and clears the account state. **If the device is offline at wipe
 time, the "CadenceRx refills" calendar stays in the Google account** and the
 user has to delete it in Google Calendar. There is no retry after a wipe.
+
+## Owner setup (Google Cloud)
+
+Device testing needs all of these; none are done in the repo:
+
+1. Create a Google Cloud project and enable the **Google Calendar API**.
+2. Configure the OAuth consent screen: External, **Testing** mode, add test
+   users. In Testing mode Google issues short-lived refresh tokens (about a
+   week), so expect to reconnect weekly until the app is verified.
+3. Create an **iOS** OAuth client (bundle id) and an **Android** OAuth client
+   (package name + SHA-1). The app has no bundle identifiers yet
+   (`ios.bundleIdentifier` / `android.package` are unset), so set those first.
+4. Set `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` and
+   `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` (static dotted access only; Expo
+   inlines them). `app.config.ts` adds the iOS reversed-client-id scheme
+   (`com.googleusercontent.apps.*`) only when the iOS id is present.
+5. Build a development build (`npx expo run:ios|android` or EAS development);
+   Expo Go cannot run this flow.
+
+## Verification before public release (owner tasks)
+
+Not done in this PR; required before any public launch:
+
+- [ ] Google OAuth verification for the sensitive `calendar.app.created` scope,
+      a privacy policy URL, and a demo video.
+- [ ] Move the consent screen out of Testing mode and re-test token refresh.
+- [ ] Device checklist below on iOS and Android.
+
+## Device verification checklist (owner)
+
+Run on a development build with the client ids configured:
+
+- [ ] Connect: the browser sheet opens, consent shows only the one calendar
+      scope, and control returns to the app with no dead end.
+- [ ] A "CadenceRx refills" calendar appears; nothing else in the Google
+      account is touched.
+- [ ] A medication with a fill date gets a 09:00 event with a popup at 09:00;
+      the title is generic.
+- [ ] Edit supply: the event moves. Rename: no API call. Pause: the event is
+      removed.
+- [ ] Delete a medication: its event is removed. Repeat in airplane mode: it
+      is removed after reconnecting.
+- [ ] Names switch on: every event is updated; off: updated back.
+- [ ] Disconnect with Remove deletes the calendar; with Keep, reconnecting
+      resumes with no duplicates.
+- [ ] Revoke access in the Google account (and, in Testing mode, wait out
+      token expiry): the screen shows Reconnect.
+- [ ] Change the device time zone, open the app: events re-pin to 09:00 local.
+- [ ] Bulk sync modal shows live progress with five or more medications.
 
 ## Testing
 

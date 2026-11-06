@@ -14,9 +14,12 @@ record a refill and see what is running low.
 - States: loading, empty ("Add a medication in Regimen to track its supply."), a
   dismissible save-error banner, and pull-to-retry on load error.
 
+A calendar button in the header (top right, next to "+ Add") opens the
+[Calendar sync](calendar-sync.md) screen (`testID="cabinet-calendar-sync"`).
+
 Test ids: `cabinet-row-<id>`, `cabinet-refill-30-<id>`,
 `cabinet-refill-custom-<id>`, `refill-preset-<n>`, `refill-sheet-input`,
-`refill-sheet-apply`, `refill-sheet-cancel`.
+`refill-sheet-apply`, `refill-sheet-cancel`, `cabinet-calendar-sync`.
 
 ## The "low" rule
 

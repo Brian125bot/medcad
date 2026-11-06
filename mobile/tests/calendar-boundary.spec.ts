@@ -1,6 +1,7 @@
 /**
- * Calendar sync boundary guard: screens import only `@/lib/calendar`, and the
- * pure calendar modules import no React, React Native, Expo, or network code.
+ * Calendar sync boundary guard: screens import only `@/lib/calendar`, the
+ * pure calendar modules import no React, React Native, Expo, or network code,
+ * and Google sign-in stays inside lib/calendar.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -19,13 +20,25 @@ function sourceFiles(dir: string): string[] {
 const imports = (file: string) =>
   [...readFileSync(file, 'utf8').matchAll(/(?:from\s+|require\(\s*|import\(\s*)['"]([^'"]+)['"]/g)].map((m) => m[1]);
 
-const PURE = ['engine', 'errors', 'event-content', 'fingerprint', 'placeholder-adapters', 'planner', 'ports', 'settings'];
+const PURE = [
+  'engine',
+  'errors',
+  'event-content',
+  'fingerprint',
+  'google-api',
+  'google-auth',
+  'google-config',
+  'placeholder-adapters',
+  'planner',
+  'ports',
+  'settings',
+];
 
 describe('calendar boundary', () => {
   it('app/, components/, and hooks/ import calendar sync only through @/lib/calendar', () => {
     const offenders = ['app', 'components', 'hooks']
       .flatMap((dir) => sourceFiles(join(ROOT, dir)))
-      .filter((file) => imports(file).some((spec) => /lib\/calendar\/./.test(spec)))
+      .filter((file) => imports(file).some((spec) => /lib\/calendar\//.test(spec) || spec === 'expo-auth-session'))
       .map((file) => relative(ROOT, file));
     expect(offenders).toEqual([]);
   });
@@ -36,13 +49,28 @@ describe('calendar boundary', () => {
       imports(file).some((spec) => /^(react|react-native|expo)(-|\/|$)/.test(spec) || /expo-/.test(spec)),
     );
     expect(offenders.map((file) => relative(ROOT, file))).toEqual([]);
-    for (const file of files) expect(readFileSync(file, 'utf8')).not.toMatch(/\bfetch\(|XMLHttpRequest|googleapis\.com/);
+    for (const file of files) expect(readFileSync(file, 'utf8')).not.toMatch(/\bfetch\(|XMLHttpRequest/);
   });
 
-  it('PR 1 ships no network code in lib/calendar', () => {
+  it('network calls (fetch) live only in the expo-* adapters and wiring', () => {
     for (const file of sourceFiles(join(ROOT, 'lib', 'calendar'))) {
-      expect(readFileSync(file, 'utf8')).not.toMatch(/\bfetch\(|XMLHttpRequest|googleapis\.com|expo-auth-session/);
+      const name = relative(ROOT, file);
+      const isAdapter = /expo-.*\.ts$/.test(name) || name.endsWith('index.ts');
+      const hasNetwork = /\bfetch\(/.test(readFileSync(file, 'utf8'));
+      expect(hasNetwork && !isAdapter, name).toBe(false);
     }
+  });
+
+  it('lib/notifications never imports Google sign-in and lib/calendar never imports expo-notifications', () => {
+    const offenders = [
+      ...sourceFiles(join(ROOT, 'lib', 'notifications')).flatMap((file) =>
+        imports(file).includes('expo-auth-session') ? [relative(ROOT, file)] : [],
+      ),
+      ...sourceFiles(join(ROOT, 'lib', 'calendar')).flatMap((file) =>
+        imports(file).includes('expo-notifications') ? [relative(ROOT, file)] : [],
+      ),
+    ];
+    expect(offenders).toEqual([]);
   });
 
   it('only calendar sync writes go through recordCalendarSync, never saveMedication', () => {
