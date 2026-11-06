@@ -11,6 +11,7 @@ export default defineConfig({
         'lib/schedule/**/*.ts',
         'lib/wizard/**/*.ts',
         'lib/today/**/*.ts',
+        'lib/cabinet/**/*.ts',
         'lib/storage/benchmark-access.ts',
         'lib/storage/database-file-scan.ts',
         'lib/storage/device-benchmark.ts',

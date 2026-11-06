@@ -23,21 +23,21 @@ import {
   assertNever,
   computeAdherenceAnalytics,
   diffDaysBetweenKeys,
-  estimateDaysOfSupplyRemaining,
   getScheduledDosesForDate,
-  NO_CONSUMPTION_DAYS,
   parseDateKey,
   type EffectiveDoseStatus,
 } from '../schedule';
+import { getSupplyWarning } from '../schedule/supply-warning';
+import type { SupplyWarning } from '../schedule/supply-warning';
+
+export { getSupplyWarning, LOW_SUPPLY_DAYS } from '../schedule/supply-warning';
+export type { SupplyWarning } from '../schedule/supply-warning';
 
 /** Section order on the Today screen (the slot labels set by the wizard). */
 export const TIME_OF_DAY_BLOCKS: readonly TimeOfDayBlock[] = ['Morning', 'Midday', 'Evening', 'Bedtime'];
 
 /** Days shown in the date strip: the six days before today, then today. */
 export const DATE_STRIP_DAYS = 7;
-
-/** A medication with this many days of supply or fewer gets a refill warning. */
-export const LOW_SUPPLY_DAYS = 7;
 
 /** How far ahead the rest-day state looks for the next scheduled dose. */
 export const NEXT_DOSE_LOOKAHEAD_DAYS = 366;
@@ -63,13 +63,6 @@ export interface DayProgress {
   fraction: number;
   /** Every scheduled dose is `taken` (and at least one is scheduled). */
   allTaken: boolean;
-}
-
-export interface SupplyWarning {
-  level: 'out' | 'low';
-  /** Days of supply left from `todayKey` (today inclusive). */
-  daysLeft: number;
-  label: string;
 }
 
 export interface DateStripDay {
@@ -305,19 +298,6 @@ export function groupDosesByBlock(doses: ScheduledDoseInstance[], activeBlock: T
       },
     ];
   });
-}
-
-/** Refill warning for an active medication that is out or within `LOW_SUPPLY_DAYS`/its threshold. */
-export function getSupplyWarning(medication: Medication, todayKey: string): SupplyWarning | null {
-  if (!medication.active) return null;
-  const { currentUnits, lowThresholdUnits } = medication.inventory;
-  const daysLeft = estimateDaysOfSupplyRemaining(medication, todayKey);
-  if (daysLeft === NO_CONSUMPTION_DAYS) return null;
-  if (currentUnits <= 0 || daysLeft === 0) return { level: 'out', daysLeft: 0, label: 'Out of stock' };
-  if (currentUnits <= lowThresholdUnits || daysLeft <= LOW_SUPPLY_DAYS) {
-    return { level: 'low', daysLeft, label: `Refill soon · ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left` };
-  }
-  return null;
 }
 
 /** First scheduled dose on a day after `fromKey`, within `NEXT_DOSE_LOOKAHEAD_DAYS`. */
