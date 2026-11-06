@@ -4,10 +4,15 @@ Local, offline dose reminders scheduled with **expo-notifications 57**. Nothing
 is sent from a server: the OS fires each reminder at its scheduled time, with
 the phone locked or offline, as long as it is scheduled.
 
-> **Device status:** the engine is tested under Node only. Every item in
+> **Device status (2026-11-06):** COR-76 and COR-77 are Done in code and tested
+> under Node only. Every item in
 > [Device acceptance checklist](#device-acceptance-checklist) is unverified
-> until it is run on a physical iPhone and Android phone (same dev build as
-> COR-88 / COR-91). Expo Go cannot run it; use a development build.
+> until it is run on a physical iPhone and Android phone. That run is COR-97
+> (In Progress), on the same development build as COR-88 / COR-91. Expo Go
+> cannot run it. As of `7d72238`, two residuals are filed in Linear (Backlog)
+> and not fixed in that commit: COR-98 (permission revoke does not cancel
+> `cx.dose.*`) and COR-99 (sentinel and window-end reminders can still carry
+> the `dose_reminder` category).
 
 ## How it fits together
 
