@@ -222,6 +222,23 @@ navigation; body taps still open Today.
 **Device follow-up (not verified in CI):** run the checklist items below on a
 physical iPhone and Android development build.
 
+## COR-78 low-stock refill alerts
+
+A separate `cx.refill.` namespace plans one alert per medication per low-stock
+episode. The crossing date is `today + max(0, daysLeft − LOW_SUPPLY_DAYS)` at
+09:00 local (`REFILL_ALERT_MINUTE`); a crossing noticed after 09:00 with no prior
+marker alerts once, `REFILL_IMMEDIATE_DELAY_MINUTES` from now. An episode marker
+(civil date key in the encrypted `notifications.refillAlertState` preference)
+prevents re-alerting the same episode and is dropped when the medication is
+refilled, paused, or deleted. At most `MAX_REFILL_NOTIFICATIONS` (8) alerts are
+scheduled, soonest first, ties by id, sharing the 16 reserved iOS slots. Refill
+content has **no** `categoryIdentifier`, so it never offers Take / Snooze / Skip
+and never reaches the COR-77 action executor. Permission revoke and vault wipe
+cancel `cx.refill.`; markers survive revoke. The "Low-stock alerts" switch
+(`notifications.refillAlertsEnabled`, default on) stops new alerts without
+clearing markers. Body taps route `cx.refill.` → Cabinet, `cx.dose.`/`cx.snooze.`
+→ Today. `ReminderStatus.refillCount` reports the scheduled count.
+
 ## Device acceptance checklist
 
 Not verified by the author — run on a physical iPhone and Android phone:
@@ -253,3 +270,6 @@ Not verified by the author — run on a physical iPhone and Android phone:
 - [ ] **COR-77:** Delete vault with a snooze pending: the snooze is cancelled
 - [ ] **COR-77:** Badge matches today's pending count after each action
 - [ ] **COR-77:** Grouped notification applies the chosen action to every **pending** dose in the group
+- [ ] **COR-78:** A medication crossing into the low band alerts once at 09:00 local; refilling it clears the alert and does not re-alert the same episode
+- [ ] **COR-78:** Tapping a refill alert (warm and cold start) opens Cabinet, not Today
+- [ ] **COR-78:** Refill alerts show no Take / Snooze / Skip buttons; the "Low-stock alerts" switch stops them
