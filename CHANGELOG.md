@@ -46,6 +46,9 @@ the issue id and PR number where there are any.
   `dose_reminder` category, so they do not show Take / Snooze / Skip (COR-99).
   `hashReminderContent` includes `categoryIdentifier`, so reminders scheduled
   before this pick up the category change on the next reconcile. *(COR-99)*
+- **[mobile]** `refillMedication` uses civil `toDateKey` dates (roadmap gap 17)
+  and a lost-update-safe `inventoryBaseline`, so a concurrent `logDose` is no
+  longer overwritten. *(COR-78)*
 
 ### Added
 - **[mobile]** COR-78 Cabinet tab: every medication with current units, a

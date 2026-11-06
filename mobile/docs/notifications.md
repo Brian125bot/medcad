@@ -270,6 +270,10 @@ Not verified by the author — run on a physical iPhone and Android phone:
 - [ ] **COR-77:** Delete vault with a snooze pending: the snooze is cancelled
 - [ ] **COR-77:** Badge matches today's pending count after each action
 - [ ] **COR-77:** Grouped notification applies the chosen action to every **pending** dose in the group
-- [ ] **COR-78:** A medication crossing into the low band alerts once at 09:00 local; refilling it clears the alert and does not re-alert the same episode
-- [ ] **COR-78:** Tapping a refill alert (warm and cold start) opens Cabinet, not Today
-- [ ] **COR-78:** Refill alerts show no Take / Snooze / Skip buttons; the "Low-stock alerts" switch stops them
+- [ ] **COR-78:** A refill alert fires at 09:00 on the crossing date, with the app closed
+- [ ] **COR-78:** A low-stock medication saved after 09:00 alerts within about a minute, once
+- [ ] **COR-78:** A refill cancels or moves the alert
+- [ ] **COR-78:** Tapping the alert opens Cabinet
+- [ ] **COR-78:** A refill alert shows no action buttons
+- [ ] **COR-78:** The low-stock switch disables alerts
+- [ ] **COR-78:** Revoking notification permission removes pending refill alerts
