@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default defineConfig([{
-    extends: [...next],
-}]);
+export default defineConfig([
+    // mobile/ is a separate Expo app with its own tsconfig and eslint.config.js;
+    // it is checked by the mobile gate, not by the Next.js prototype's tooling.
+    { ignores: ["mobile/**"] },
+    {
+        extends: [...next],
+    },
+]);
