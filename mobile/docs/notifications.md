@@ -9,9 +9,10 @@ the phone locked or offline, as long as it is scheduled.
 > [Device acceptance checklist](#device-acceptance-checklist) is unverified
 > until it is run on a physical iPhone and Android phone. That run is COR-97
 > (In Progress), on the same development build as COR-88 / COR-91. Expo Go
-> cannot run it. Two residuals are filed and not fixed on this snapshot:
-> COR-98 (permission revoke does not cancel `cx.dose.*`) and COR-99 (sentinel
-> and window-end reminders can still carry the `dose_reminder` category).
+> cannot run it. As of `7d72238`, two residuals are filed in Linear (Backlog)
+> and not fixed in that commit: COR-98 (permission revoke does not cancel
+> `cx.dose.*`) and COR-99 (sentinel and window-end reminders can still carry
+> the `dose_reminder` category).
 
 ## How it fits together
 

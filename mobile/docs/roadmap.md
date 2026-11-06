@@ -50,8 +50,8 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-76 | Native background alarm and notification engine | 5 | **Done** (code) | PR #20 (`5953af3`), 2026-11-06. Post-commit repository events drive one reconciler; [notifications.md](notifications.md). Device QA is COR-97. The local `modules/exact-alarm` module is unbuilt until the first development build |
 | COR-77 | Interactive lock-screen notification actions | 5 | **Done** (code) | PR #22 (`828b295`) and remediation PR #23 (`7929a42`), 2026-11-06. Take / Snooze 15m / Skip; device checklist in [notifications.md](notifications.md), covered by COR-97 |
 | COR-97 | Device QA of the COR-76 reminder engine on iOS and Android | 1 | **In Progress** | Checklist in [notifications.md](notifications.md). Same development build as COR-88 and COR-91. No device evidence yet |
-| COR-98 | Cancel `cx.dose.*` when notification permission is revoked | – | Backlog | Filed 2026-11-06. On permission denied the reconciler reports `scheduledCount: 0` without cancelling already scheduled `cx.dose.*` entries |
-| COR-99 | Do not attach dose actions to sentinel or window-end reminders | – | Backlog | Filed 2026-11-06. `expo-scheduler` defaults `categoryIdentifier` to `dose_reminder`, and `hashReminderContent` omits it, so sentinels can show Take / Snooze / Skip |
+| COR-98 | Cancel `cx.dose.*` when notification permission is revoked | – | Backlog | Filed 2026-11-06. On `7d72238`, permission denied reports `scheduledCount: 0` without cancelling already scheduled `cx.dose.*` entries |
+| COR-99 | Do not attach dose actions to sentinel or window-end reminders | – | Backlog | Filed 2026-11-06. On `7d72238`, `expo-scheduler` defaults `categoryIdentifier` to `dose_reminder`, and `hashReminderContent` omits it, so sentinels can show Take / Snooze / Skip |
 
 ### M4 — Cabinet, refills and calendar sync
 
