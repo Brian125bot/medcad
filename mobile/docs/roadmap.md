@@ -61,7 +61,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | Issue | Title | Pts | Status |
 | --- | --- | --- | --- |
 | COR-78 | Cabinet inventory management and low-stock alerts | 3 | In review |
-| COR-79 | Mobile Google Calendar refill sync | 3 | Backlog |
+| COR-79 | Mobile Google Calendar refill sync | 3 | Part 1 in review |
 
 ### M5 — Analytics and clinical tools
 
