@@ -29,7 +29,7 @@ npm ci            # use the lockfile (package-lock.json); there is no bun.lock h
 | Command | What it does | Notes |
 | --- | --- | --- |
 | `npm test` | All Node suites (`tests/*.test.ts`, `*.test.mts`, `storage-core.mts`) via `tsx`, then the vitest suite with coverage | ~10 s. **The main gate.** |
-| `npm run test:schedule` | Vitest only (`tests/*.spec.ts`) with coverage; **fails below 100 %** on `lib/schedule/**` and `lib/wizard/**` | |
+| `npm run test:schedule` | Vitest only (`tests/*.spec.ts`) with coverage; **fails below 100 %** on `lib/schedule/**`, `lib/wizard/**`, `lib/today/**`, `lib/storage/device-benchmark.ts` and `lib/storage/diagnostics.ts` (see `vitest.config.ts`) | |
 | `npm run test:tz` | The vitest suite once per time zone (UTC, America/Chicago, America/New_York, Pacific/Auckland, Asia/Kolkata, Pacific/Honolulu) | ~30 s. Run when touching date logic. |
 | `npx tsc --noEmit` | Typecheck the whole app project | must be clean |
 | `npm run typecheck:storage` | Typecheck the Node test project (`tsconfig.test.json`: `lib/**` and `tests/**`, minus the `expo-*` adapters) | must be clean |

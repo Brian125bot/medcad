@@ -3,13 +3,14 @@
 Where the mobile app stands against its plan, what is unfinished or fragile, and
 what depends on what. **Linear is the source of truth** — project
 [CadenceRx Mobile v1.0](https://linear.app/coretek/project/cadencerx-mobile-v10-c1c5474d54a2)
-(team `COR`). This page is a snapshot taken on **2026-10-16**; when it
+(team `COR`). This page is a snapshot taken on **2026-11-05** (`main` at `aa496fc`, PR #18); when it
 disagrees with Linear, Linear wins, and this page should be updated.
 
 > **The one-sentence status:** the data layer (encrypted storage, schedule
 > engine) is built and well tested under Node; Today and the add/edit medication
 > wizard are built in code; nothing has been run on a device yet (COR-88,
-> COR-91). Bundling works after COR-90 restored the Space Mono font.
+> COR-91). Bundling works after COR-90 restored the Space Mono font. M1 and M2
+> are code-complete apart from that device verification; M3–M6 have not started.
 
 ## Milestones and issues
 
@@ -22,7 +23,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-70 | Scaffold Expo project and theme tokens | 3 | Done |
 | COR-71 | Local encrypted SQLite / storage layer | 5 | Done *(performance criterion unverified — see COR-88)* |
 | COR-72 | Port and optimise schedule frequency and streak engine | 3 | Done |
-| COR-88 | Verify COR-71 on a physical device; record a real benchmark | 3 | **In Progress** |
+| COR-88 | Verify COR-71 on a physical device; record a real benchmark | 3 | **In Progress** *(PR #16 merged the benchmark harness only, no device numbers yet; Linear had closed the issue on 2026-10-16 and it was reopened on 2026-11-05)* |
 
 ### M2 — Native UI and dose interaction
 
@@ -34,7 +35,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | **Done** | Delivered by PR #8 (appearance in the encrypted payload, no migration) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | **Done** | `SpaceMono-Regular.ttf` + OFL in `assets/fonts/` |
 | COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Unblocked by COR-90 |
-| COR-93 | Handle `dose_logs` for slots removed in edit | 2 | **In Review** | Past logs kept as history with an encrypted `slotSnapshot`; counted by analytics; future-dated logs removed |
+| COR-93 | Handle `dose_logs` for slots removed in edit | 2 | **Done** (PR #18, `aa496fc`) | Past logs kept as history with an encrypted `slotSnapshot`; counted by analytics; future-dated logs removed |
 | COR-95 | Editor save overwrites stock logged on Today | – | **Done** | `9e2d6db`; was gap 6 |
 | COR-96 | Undo refunds current slot dose, not units taken | – | **Done** | `b5aefbd`; was gap 4 |
 
@@ -74,7 +75,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status | Notes |
 | --- | --- | --- | --- | --- |
-| COR-92 | Set up ESLint so `expo lint` runs | 1 | Backlog | **Implemented by PR #8** |
+| COR-92 | Set up ESLint so `expo lint` runs | 1 | **Done** | Implemented by PR #8 |
 | COR-94 | Recalculate or flag `nextFillDate` when schedule/inventory is edited | 2 | Backlog | Uses `lib/schedule/supply.ts` |
 
 Only dependencies seen in Linear are listed; other issues may have relations
@@ -82,6 +83,9 @@ that are not recorded here.
 
 ## Recently merged
 
+- **PR #18** (`aa496fc`) — COR-93: dose history survives removing a slot or a medication.
+- **PR #16** (`d5404b4`) — COR-88 device benchmark harness and dev-only screen. Tooling only: no device numbers yet.
+- **PR #15** (`334dc19`) — COR-90 follow-up: a font load failure no longer crashes the app shell.
 - **PR #8 — `fix/cor-75-wizard-followups`** (merged to `main` as `0dbe450`).
   It (1) persists the pill look, (2) accepts `.5` and comma decimals, and
   (3) makes `npm run lint` work. Everything in these docs that mentions
@@ -101,11 +105,13 @@ that are not recorded here.
    wizard QA on iOS/Android next.
 2. **Device QA of COR-74 (Today)** — gestures, haptics, ring and layout have
    only been type-checked.
-3. ~~**COR-93**~~ — in review: orphan logs keep a `slotSnapshot` and count as
-   history; Today shows current slots only.
-4. **COR-76** is independent of 73/74 and can run in parallel; its design work
-   (post-save hook, rolling schedule window) needs no device, its acceptance
-   test does.
+3. ~~**COR-93**~~ — done (PR #18): orphan logs keep a `slotSnapshot` and count
+   as history; Today shows current slots only.
+4. **COR-76 is next.** It is the Urgent M3 issue and every blocker is closed.
+   Its design work (post-save hook, rolling schedule window) needs no device;
+   its acceptance test does, and `expo-notifications` is native, so it needs a
+   development build — the same build item 1 needs. Do item 1 first.
+5. **COR-94** — pure functions, no device. Land it before COR-79 (calendar sync).
 
 ## Known gaps and sharp edges
 
@@ -123,12 +129,13 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 8 | No notification hook | Saving or deleting a medication schedules nothing. `deleteMedication` doesn't go through `saveMedication`, so a hook must cover both | [architecture.md](architecture.md#5-runtime-flows) | COR-76 |
 | 9 | Migration runner is a single step | There is no per-version logic, and the audit-row text is hard-coded to v1. Adding a v2 needs the ordered-step structure first (not needed for payload-only fields) | [storage.md](storage.md#schema-versions-and-migrations) | Untracked (becomes necessary with the first column change) |
 | 10 | No delete / pause UI | `deleteMedication` and `toggleActiveMedication` exist but no screen calls them | [medication-wizard.md](medication-wizard.md#behaviour-to-be-aware-of) | Untracked |
-| 11 | No CI | `.github/` has never existed; the local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
+| 11 | No CI | `.github/` does not exist on `main` (a workflow sits unmerged on branch `ci-github-actions`, `bbdacf3`); the local gate in [development.md](development.md#before-you-call-a-change-done) is the only check | [development.md](development.md#commands) | Nearest: COR-87 |
 | 12 | `mobile/` isn't self-contained | Two parity specs import the web module at the repo root, so they fail if `mobile/` is checked out alone | [architecture.md](architecture.md#8-relationship-to-the-web-prototype) | Untracked |
 | 13 | Legacy duplication in the domain module | Web-parity copies of schedule helpers (and duplicate `buildDoseKey` / `toDateKey`) sit beside the hardened `lib/schedule` versions | [architecture.md](architecture.md#7-legacy-duplication) | Untracked |
 | 14 | Scaffold leftovers | `app/modal.tsx`, `EditScreenInfo`, the Themed components and the dev-only Theme tab (`app/(tabs)/two.tsx`) are template code. The scaffold tabs were replaced in COR-73 | [architecture.md](architecture.md#2-module-map) | Untracked |
 | 15 | `app.json` has no `ios.bundleIdentifier` / `android.package` | EAS builds and store submission need them | `mobile/app.json` | Untracked (release work, COR-87) |
-| 16 | No component tests; coverage gate covers only `lib/schedule` and `lib/wizard` | UI regressions are caught only by hand. Storage has tests but no coverage threshold | [development.md](development.md#testing) | Untracked |
+| 16 | No component tests; the 100 % coverage gate covers only `lib/schedule`, `lib/wizard`, `lib/today`, `lib/storage/device-benchmark.ts` and `lib/storage/diagnostics.ts` | UI regressions are caught only by hand. The rest of storage (repository, mappers, vault) has tests but no coverage threshold | [development.md](development.md#testing) | Untracked |
+| 17 | UTC date slicing in the repository | `refillMedication` sets `inventory.lastRefilledAt` and demo seeding derives its `todayKey` with `new Date().toISOString().slice(0, 10)`, which is the **UTC** date: in a negative-offset zone it is already tomorrow in the evening (e.g. after 18:00 in Chicago in winter). The project rule is to use `toDateKey` from `lib/schedule/date-keys.ts`. `refillMedication` has no UI caller yet; COR-78's refill buttons will be the first | `lib/storage/context.ts` (`refillMedication`; `seedDemoVault` call and `createInitialSeedData` fallback) | Untracked |
 
 ## Where the web prototype fits
 

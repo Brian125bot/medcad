@@ -29,7 +29,7 @@ recorded in the repo-root [`CHANGELOG.md`](../CHANGELOG.md).
 | Safe area  | `react-native-safe-area-context` + `expo-status-bar`|
 | Storage    | `expo-sqlite` + `expo-crypto` (AES-256-GCM) + `expo-secure-store`, behind ports in `lib/storage` |
 | Pickers / graphics | `@react-native-community/datetimepicker`, `react-native-svg` |
-| Tests      | `tsx` + `node:assert` (storage), Vitest 3 with a 100 % coverage gate (schedule, wizard) |
+| Tests      | `tsx` + `node:assert` (storage), Vitest 3 with a 100 % coverage gate (schedule, wizard, today, storage benchmark and diagnostics) |
 
 ## Design tokens
 
