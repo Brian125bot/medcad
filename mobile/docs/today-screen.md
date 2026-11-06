@@ -61,7 +61,8 @@ skip. Failures (e.g. web) are ignored.
 
 ## Not done / known limits
 
-- **Snooze** is not offered: there is no reminder scheduler yet (COR-76). The
+- **Snooze** is not offered: there is no reminder scheduler yet (COR-76), and the
+  Snooze action itself is COR-77. The
   swipe-left sheet only skips, with an optional reason saved as the log note.
 - Undo of a take (or changing it to skipped / pending) refunds the units
   recorded on the log (`unitsTaken`, COR-96); logs from before that fix fall
