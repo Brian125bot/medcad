@@ -48,7 +48,7 @@ function publish(next: ReminderStatus): void {
 /** Starts the engine once storage is ready. Returns a stop function. */
 export function startReminderEngine(
   context: Pick<StorageContext, 'repository'>,
-  options: { onOpenToday: () => void },
+  options: { onOpenToday: () => void; onOpenCabinet: () => void },
 ): () => void {
   if (Platform.OS === 'web' || engine) return () => {};
   configureForegroundPresentation();
@@ -63,7 +63,10 @@ export function startReminderEngine(
   promptRepository = context.repository;
   wireNotificationResponseContext(context);
   const offStatus = current.subscribeStatus(() => publish(current.getStatus()));
-  const offTaps = subscribeToReminderTaps(options.onOpenToday);
+  const offTaps = subscribeToReminderTaps((destination) => {
+    if (destination === 'cabinet') options.onOpenCabinet();
+    else options.onOpenToday();
+  });
   const offActions = subscribeToReminderActions();
   void registerReminderActionBackgroundTask();
   const coldStart = Notifications.getLastNotificationResponse();

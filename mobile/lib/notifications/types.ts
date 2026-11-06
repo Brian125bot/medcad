@@ -81,4 +81,6 @@ export interface ReminderStatus {
   lastReconciledAt: string | null;
   scheduledCount: number;
   truncated: boolean;
+  /** Scheduled low-stock refill alerts (COR-78); absent until the first refill reconcile. */
+  refillCount?: number;
 }

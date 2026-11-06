@@ -20,7 +20,7 @@ import { toExactAlarmStatus } from './exact-alarm';
 import { canScheduleExactAlarms } from './expo-exact-alarm';
 import { parseDoseGroupPayload } from './payload';
 import { readScheduleMeta, withScheduleMeta } from './schedule-meta';
-import { DOSE_NAMESPACE, SNOOZE_NAMESPACE } from './types';
+import { reminderTapDestination, type TapDestination } from './tap-routing';
 
 const VIBRATION_PATTERN = [0, 250, 250, 250];
 
@@ -171,21 +171,20 @@ export function configureForegroundPresentation(): void {
   });
 }
 
-/** Calls `onTap` when a dose/snooze reminder body is tapped, including cold start. */
-export function subscribeToReminderTaps(onTap: () => void): () => void {
-  const isBodyTap = (response: Notifications.NotificationResponse | null) =>
-    !!response &&
-    response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER &&
-    (response.notification.request.identifier.startsWith(DOSE_NAMESPACE) ||
-      response.notification.request.identifier.startsWith(SNOOZE_NAMESPACE));
+/** Calls `onTap` with the destination when a reminder body is tapped, including cold start. */
+export function subscribeToReminderTaps(onTap: (destination: TapDestination) => void): () => void {
+  const destinationOf = (response: Notifications.NotificationResponse | null): TapDestination =>
+    response ? reminderTapDestination(response.notification.request.identifier, response.actionIdentifier) : null;
 
   const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-    if (isBodyTap(response)) onTap();
+    const destination = destinationOf(response);
+    if (destination) onTap(destination);
   });
   const coldStart = Notifications.getLastNotificationResponse();
-  if (isBodyTap(coldStart)) {
+  const coldDestination = destinationOf(coldStart);
+  if (coldDestination) {
     Notifications.clearLastNotificationResponse();
-    onTap();
+    onTap(coldDestination);
   }
   return () => subscription.remove();
 }

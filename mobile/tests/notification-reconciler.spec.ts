@@ -19,6 +19,7 @@ import { PREF_EXACT_ALARM_PROMPTED } from '../lib/notifications/exact-alarm';
 import { PREF_HANDLED_ACTION_RESPONSES } from '../lib/notifications/response-dedupe';
 import { PREF_SHOW_MEDICATION_NAMES } from '../lib/notifications/settings';
 import type { CivilNow } from '../lib/notifications/types';
+import { PREF_REFILL_ALERTS_ENABLED, PREF_REFILL_ALERT_STATE, REFILL_NAMESPACE } from '../lib/notifications/refill-alerts';
 import { DOSE_NAMESPACE, SNOOZE_NAMESPACE } from '../lib/notifications/types';
 import type { RepositoryListener } from '../lib/storage/context';
 import { buildDoseKey } from '../lib/schedule/doses';
@@ -42,6 +43,9 @@ function fakeRepository(medications: Medication[] = [makeMed()]) {
     },
     async getPreference<T>(key: string, fallback: T): Promise<T> {
       return (repo.prefs.has(key) ? repo.prefs.get(key) : fallback) as T;
+    },
+    async setPreference<T>(key: string, value: T): Promise<void> {
+      repo.prefs.set(key, value);
     },
     subscribe(listener: RepositoryListener) {
       listeners.add(listener);
@@ -159,7 +163,7 @@ describe('ReminderEngine.reconcile', () => {
       ['2026-10-16', '2026-10-30'],
       ['2026-10-16', '2026-10-16'],
     ]);
-    expect(engine.getStatus()).toEqual({ state: 'ok', lastReconciledAt: '2026-10-16T12:00:00.000Z', scheduledCount: 15, truncated: false });
+    expect(engine.getStatus()).toEqual({ state: 'ok', lastReconciledAt: '2026-10-16T12:00:00.000Z', scheduledCount: 15, truncated: false, refillCount: 1 });
     const first = scheduler.scheduled.get('cx.dose.2026-10-16.0800')!.request!;
     expect(first.fireAtMs).toBe(Date.UTC(2026, 9, 16, 8));
     expect(first.content.body).toBe('1 dose due at 480m');
@@ -192,7 +196,7 @@ describe('ReminderEngine.reconcile', () => {
     repository.prefs.set(PREF_SHOW_MEDICATION_NAMES, true);
     scheduler.calls.length = 0;
     await engine.reconcile();
-    expect(scheduler.calls.filter((c) => c.startsWith('cancel'))).toHaveLength(14);
+    expect(scheduler.calls.filter((c) => c.startsWith('cancel'))).toHaveLength(15);
     expect(scheduler.scheduled.get('cx.dose.2026-10-16.0800')!.request!.content.body).toBe('Testamol due at 480m');
 
     // Same id and content, drifted fire instant (e.g. a timezone change) -> rescheduled.
@@ -239,12 +243,12 @@ describe('ReminderEngine.reconcile', () => {
       exact: null,
       doseKeys: ['2026-10-17_med-a_slot-am'],
     });
-    scheduler.scheduled.set('cx.refill.y', { id: 'cx.refill.y', fireAtMs: 1, contentHash: null, exact: null });
+    scheduler.scheduled.set('cx.widget.y', { id: 'cx.widget.y', fireAtMs: 1, contentHash: null, exact: null });
     scheduler.scheduled.set('cx.dose.stale', { id: 'cx.dose.stale', fireAtMs: 1, contentHash: null, exact: null });
     await engine.reconcile();
     repository.medications = [];
     await engine.reconcile();
-    expect([...scheduler.scheduled.keys()].sort()).toEqual(['cx.refill.y']);
+    expect([...scheduler.scheduled.keys()].sort()).toEqual(['cx.widget.y']);
   });
 
   it('ignores dedupe and exact-alarm prompt preference changes', async () => {
@@ -329,7 +333,12 @@ describe('ReminderEngine.reconcile', () => {
     await engine.reconcile();
     expect([...scheduler.scheduled.keys()].filter((id) => id.startsWith(DOSE_NAMESPACE))).toEqual([]);
     expect(scheduler.scheduled.has(snoozeId)).toBe(true);
-    expect(scheduler.calls.filter((call) => call.startsWith('cancel ')).every((call) => call.includes(DOSE_NAMESPACE))).toBe(true);
+    expect([...scheduler.scheduled.keys()].filter((id) => id.startsWith(REFILL_NAMESPACE))).toEqual([]);
+    expect(
+      scheduler.calls
+        .filter((call) => call.startsWith('cancel '))
+        .every((call) => call.includes(DOSE_NAMESPACE) || call.includes(REFILL_NAMESPACE)),
+    ).toBe(true);
     expect(engine.getStatus()).toMatchObject({ state: 'permission-denied', scheduledCount: 0, truncated: false });
   });
 
@@ -492,5 +501,64 @@ describe('ReminderEngine.reconcile — exact-alarm metadata', () => {
     first.scheduler.calls.length = 0;
     await coldStart.reconcile();
     expect(cancelCount(first.scheduler) + scheduleCount(first.scheduler)).toBe(0);
+  });
+});
+
+describe('ReminderEngine refill alerts (COR-78)', () => {
+  const lowStock = { currentUnits: 5, capacityUnits: 30, lowThresholdUnits: 5, lastRefilledAt: '2026-01-01' };
+  const refillIds = (s: ReturnType<typeof fakeScheduler>) => [...s.scheduled.keys()].filter((id) => id.startsWith(REFILL_NAMESPACE)).sort();
+
+  it('schedules a refill alert with no action buttons and reports refillCount', async () => {
+    const { engine, scheduler, repository } = setup([makeMed({ inventory: lowStock })]);
+    await engine.reconcile();
+    expect(refillIds(scheduler)).toEqual([`${REFILL_NAMESPACE}med-a`]);
+    const entry = scheduler.scheduled.get(`${REFILL_NAMESPACE}med-a`)!;
+    expect(entry.request!.content.categoryIdentifier).toBeUndefined();
+    expect(entry.request!.content.data).toEqual({ v: 1, kind: 'refill', m: 'med-a' });
+    expect(engine.getStatus().refillCount).toBe(1);
+    expect(repository.prefs.get(PREF_REFILL_ALERT_STATE)).toEqual({ 'med-a': '2026-10-16' });
+  });
+
+  it('is idempotent and marker writes do not trigger a reconcile loop', async () => {
+    const { engine, scheduler } = setup([makeMed({ inventory: lowStock })]);
+    await engine.reconcile();
+    scheduler.calls.length = 0;
+    await engine.reconcile();
+    expect(scheduler.calls.filter((c) => c.startsWith('cancel') || c.startsWith('schedule'))).toEqual([]);
+    scheduler.calls.length = 0;
+    // The episode-marker write is ignored entirely (no reconcile, no loop).
+    await engine.handleChange({ type: 'preference-changed', prefKey: PREF_REFILL_ALERT_STATE });
+    expect(scheduler.calls).toEqual([]);
+    // The enabled toggle reconciles but schedules/cancels nothing when state is unchanged.
+    await engine.handleChange({ type: 'preference-changed', prefKey: PREF_REFILL_ALERTS_ENABLED });
+    expect(scheduler.calls.filter((c) => c.startsWith('cancel') || c.startsWith('schedule'))).toEqual([]);
+  });
+
+  it('schedules nothing when disabled and preserves markers', async () => {
+    const { engine, scheduler, repository } = setup([makeMed({ inventory: lowStock })]);
+    repository.prefs.set(PREF_REFILL_ALERTS_ENABLED, false);
+    repository.prefs.set(PREF_REFILL_ALERT_STATE, { 'med-a': '2026-10-16' });
+    await engine.reconcile();
+    expect(refillIds(scheduler)).toEqual([]);
+    expect(engine.getStatus().refillCount).toBe(0);
+    expect(repository.prefs.get(PREF_REFILL_ALERT_STATE)).toEqual({ 'med-a': '2026-10-16' });
+  });
+
+  it('caps refill alerts at MAX_REFILL_NOTIFICATIONS', async () => {
+    const meds = Array.from({ length: 10 }, (_, i) =>
+      makeMed({ id: `med-${i}`, inventory: { ...lowStock } }),
+    );
+    const { engine, scheduler } = setup(meds);
+    await engine.reconcile();
+    expect(refillIds(scheduler)).toHaveLength(8);
+    expect(engine.getStatus().refillCount).toBe(8);
+  });
+
+  it('vault deletion cancels refill alerts', async () => {
+    const { engine, scheduler, repository } = setup([makeMed({ inventory: lowStock })]);
+    await engine.reconcile();
+    expect(refillIds(scheduler)).toHaveLength(1);
+    await engine.handleChange({ type: 'vault-deleted' });
+    expect(refillIds(scheduler)).toEqual([]);
   });
 });

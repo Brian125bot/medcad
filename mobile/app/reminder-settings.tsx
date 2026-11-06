@@ -22,6 +22,7 @@ import {
   withAlert,
   withLeadMinutes,
 } from "@/lib/notifications/settings";
+import { PREF_REFILL_ALERTS_ENABLED } from "@/lib/notifications/refill-alerts";
 import type { ReminderSettings } from "@/lib/notifications/types";
 import { getStorageContext } from "@/lib/storage";
 
@@ -33,16 +34,22 @@ export default function ReminderSettingsScreen() {
   const status = useReminderStatus();
   const [medications, setMedications] = useState<Medication[] | null>(null);
   const [settings, setSettings] = useState<ReminderSettings>(DEFAULT_REMINDER_SETTINGS);
+  const [refillAlertsEnabled, setRefillAlertsEnabled] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       const { repository } = await getStorageContext();
-      const [meds, prefs] = await Promise.all([repository.getAllMedications(), readReminderSettings(repository)]);
+      const [meds, prefs, refillEnabled] = await Promise.all([
+        repository.getAllMedications(),
+        readReminderSettings(repository),
+        repository.getPreference<boolean>(PREF_REFILL_ALERTS_ENABLED, true),
+      ]);
       if (!alive) return;
       setMedications(meds.filter((m) => m.active));
       setSettings(prefs);
+      setRefillAlertsEnabled(refillEnabled === true);
     })().catch(() => alive && setMedications([]));
     void ensureReminderPermission();
     return () => {
@@ -69,6 +76,17 @@ export default function ReminderSettingsScreen() {
       const { repository } = await getStorageContext();
       if (patch.defaultLeadMinutes !== undefined) await repository.setPreference(PREF_DEFAULT_LEAD_MINUTES, patch.defaultLeadMinutes);
       if (patch.showMedicationNames !== undefined) await repository.setPreference(PREF_SHOW_MEDICATION_NAMES, patch.showMedicationNames);
+    } catch {
+      setSaveError("Could not save. Please try again.");
+    }
+  }, []);
+
+  const saveRefillAlerts = useCallback(async (enabled: boolean) => {
+    setRefillAlertsEnabled(enabled);
+    setSaveError(null);
+    try {
+      const { repository } = await getStorageContext();
+      await repository.setPreference(PREF_REFILL_ALERTS_ENABLED, enabled);
     } catch {
       setSaveError("Could not save. Please try again.");
     }
@@ -107,6 +125,19 @@ export default function ReminderSettingsScreen() {
               accessibilityLabel="Show medication names in notifications"
               value={settings.showMedicationNames}
               onValueChange={(showMedicationNames) => void savePreference({ showMedicationNames })}
+              trackColor={{ true: cadenceTokens.accent }}
+            />
+          </View>
+          <View className="mt-4 flex-row items-center justify-between">
+            <View className="flex-1 pr-3">
+              <Text className="text-sm text-slate-700">Low-stock alerts</Text>
+              <Text className="mt-0.5 text-xs text-slate-500">Get a reminder when a medication is running low.</Text>
+            </View>
+            <Switch
+              testID="reminder-settings-refill-alerts"
+              accessibilityLabel="Low-stock alerts"
+              value={refillAlertsEnabled}
+              onValueChange={(enabled) => void saveRefillAlerts(enabled)}
               trackColor={{ true: cadenceTokens.accent }}
             />
           </View>

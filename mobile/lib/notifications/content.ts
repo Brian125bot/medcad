@@ -33,7 +33,8 @@ export function channelIdFor(profile: AlertProfile): string {
 
 export type NotificationData =
   | { v: 1; kind: 'dose-group'; doses: { d: string; m: string; s: string }[] }
-  | { v: 1; kind: 'sentinel' };
+  | { v: 1; kind: 'sentinel' }
+  | { v: 1; kind: 'refill'; m: string };
 
 export interface ReminderContent {
   title: string;

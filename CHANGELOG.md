@@ -46,8 +46,21 @@ the issue id and PR number where there are any.
   `dose_reminder` category, so they do not show Take / Snooze / Skip (COR-99).
   `hashReminderContent` includes `categoryIdentifier`, so reminders scheduled
   before this pick up the category change on the next reconcile. *(COR-99)*
+- **[mobile]** `refillMedication` uses civil `toDateKey` dates (roadmap gap 17)
+  and a lost-update-safe `inventoryBaseline`, so a concurrent `logDose` is no
+  longer overwritten. *(COR-78)*
 
 ### Added
+- **[mobile]** COR-78 Cabinet tab: every medication with current units, a
+  capacity supply bar, and days of supply remaining from the schedule-walking
+  `estimateDaysOfSupplyRemaining`; amber low / red out badges; optimistic
+  **+30** and custom refill (validated, civil-dated `lastRefilledAt`,
+  lost-update-safe) with rollback on failure; a collapsed Paused section. Low-stock
+  push alerts in the `cx.refill.` namespace (09:00 local, one per episode,
+  capped at 8, no lock-screen actions) with an episode-marker store, a
+  "Low-stock alerts" switch in Reminders, and tap routing to Cabinet.
+  `refillMedication` and demo seeding now use civil `toDateKey` dates (roadmap
+  gap 17). Not device-tested. *(COR-78)*
 - **[mobile]** COR-76 local dose reminders (expo-notifications 57, not
   device-tested; PR #20, `5953af3`): post-commit `MedicationRepository.subscribe()`
   change events drive a single-flight `ReminderEngine` that reconciles a 14-day,

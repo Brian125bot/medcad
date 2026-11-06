@@ -24,6 +24,13 @@ import type {
   ReminderScheduleRequest,
 } from './ports';
 import { readReminderSettings } from './settings';
+import {
+  planRefillAlerts,
+  PREF_REFILL_ALERTS_ENABLED,
+  PREF_REFILL_ALERT_STATE,
+  REFILL_NAMESPACE,
+  type RefillAlertMarkers,
+} from './refill-alerts';
 import { DOSE_NAMESPACE, SNOOZE_NAMESPACE, type ReminderStatus } from './types';
 
 export interface ReminderEngineDeps {
@@ -40,6 +47,12 @@ export const INITIAL_REMINDER_STATUS: ReminderStatus = {
   scheduledCount: 0,
   truncated: false,
 };
+
+function sameRefillMarkers(a: RefillAlertMarkers, b: RefillAlertMarkers): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
+}
 
 export class ReminderEngine {
   private status: ReminderStatus = INITIAL_REMINDER_STATUS;
@@ -81,7 +94,8 @@ export class ReminderEngine {
     if (change.type === 'preference-changed') {
       if (
         change.prefKey === PREF_HANDLED_ACTION_RESPONSES ||
-        change.prefKey === PREF_EXACT_ALARM_PROMPTED
+        change.prefKey === PREF_EXACT_ALARM_PROMPTED ||
+        change.prefKey === PREF_REFILL_ALERT_STATE
       ) {
         return Promise.resolve();
       }
@@ -137,6 +151,13 @@ export class ReminderEngine {
     }
   }
 
+  private async cancelRefillNamespace(): Promise<void> {
+    const { scheduler } = this.deps;
+    for (const entry of await scheduler.listScheduled()) {
+      if (entry.id.startsWith(REFILL_NAMESPACE)) await scheduler.cancel(entry.id);
+    }
+  }
+
   private async runOnce(): Promise<void> {
     const { repository, scheduler, permissions, clock } = this.deps;
     try {
@@ -144,6 +165,7 @@ export class ReminderEngine {
         // The vault is gone: do not read it, just drop every dose reminder.
         this.vaultWipePending = false;
         await this.cancelDoseAndSnoozeNamespaces();
+        await this.cancelRefillNamespace();
         await scheduler.setBadgeCount(0);
         this.setStatus({ ...INITIAL_REMINDER_STATUS, lastReconciledAt: clock.nowIso() });
         return;
@@ -159,6 +181,7 @@ export class ReminderEngine {
         // Grant → schedule → revoke must not leave OS entries while the UI
         // reports zero scheduled (COR-98). Snoozes are a different namespace.
         await this.cancelDoseNamespace();
+        await this.cancelRefillNamespace();
         await scheduler.setBadgeCount(computeTodayPendingBadgeCount(medications, todayLogs, now.todayKey));
         this.setStatus({ state: 'permission-denied', lastReconciledAt: clock.nowIso(), scheduledCount: 0, truncated: false });
         return;
@@ -218,6 +241,45 @@ export class ReminderEngine {
         if (!unchanged.has(request.id)) await scheduler.schedule(request);
       }
 
+      // COR-78 low-stock refill alerts: separate namespace, episode markers in prefs.
+      const refillEnabled = (await repository.getPreference(PREF_REFILL_ALERTS_ENABLED, true)) === true;
+      const refillMarkers = await repository.getPreference<RefillAlertMarkers>(PREF_REFILL_ALERT_STATE, {});
+      const refillPlan = planRefillAlerts({
+        medications,
+        todayKey: now.todayKey,
+        minuteOfDay: now.minuteOfDay,
+        settings,
+        markers: refillMarkers,
+        enabled: refillEnabled,
+      });
+      const refillDesired = new Map<string, ReminderScheduleRequest & { hash: string }>();
+      for (const alert of refillPlan.alerts) {
+        refillDesired.set(alert.id, {
+          id: alert.id,
+          fireAtMs: clock.toEpochMs(alert.fireAt.dateKey, alert.fireAt.minuteOfDay),
+          content: alert.content,
+          exact,
+          hash: hashReminderContent(alert.content),
+        });
+      }
+      const refillUnchanged = new Set<string>();
+      for (const entry of await scheduler.listScheduled()) {
+        if (!entry.id.startsWith(REFILL_NAMESPACE)) continue;
+        const want = refillDesired.get(entry.id);
+        if (want && want.fireAtMs === entry.fireAtMs && want.hash === entry.contentHash && want.exact === entry.exact) {
+          refillUnchanged.add(entry.id);
+        } else {
+          await scheduler.cancel(entry.id);
+        }
+      }
+      for (const { hash: _refillHash, ...request } of refillDesired.values()) {
+        if (!refillUnchanged.has(request.id)) await scheduler.schedule(request);
+      }
+      if (!sameRefillMarkers(refillMarkers, refillPlan.nextMarkers)) {
+        await repository.setPreference(PREF_REFILL_ALERT_STATE, refillPlan.nextMarkers);
+      }
+      const refillCount = refillDesired.size;
+
       const todayEntries = await repository.getDoseLogsInRange(now.todayKey, now.todayKey);
       const todayLogs = Object.fromEntries(todayEntries.map((entry) => [entry.key, entry]));
       const badgeCount = computeTodayPendingBadgeCount(medications, todayLogs, now.todayKey);
@@ -228,6 +290,7 @@ export class ReminderEngine {
         lastReconciledAt: clock.nowIso(),
         scheduledCount: desired.size,
         truncated: plan.truncated,
+        refillCount,
       });
     } catch (error) {
       this.deps.log?.('[reminders] reconcile failed', error);

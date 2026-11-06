@@ -60,7 +60,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 
 | Issue | Title | Pts | Status |
 | --- | --- | --- | --- |
-| COR-78 | Cabinet inventory management and low-stock alerts | 3 | Backlog |
+| COR-78 | Cabinet inventory management and low-stock alerts | 3 | In review |
 | COR-79 | Mobile Google Calendar refill sync | 3 | Backlog |
 
 ### M5 — Analytics and clinical tools
@@ -158,7 +158,7 @@ running it on 2026-10-16. "Untracked" means no Linear issue exists for it yet.
 | 14 | Scaffold leftovers | `app/modal.tsx`, `EditScreenInfo`, the Themed components and the dev-only Theme tab (`app/(tabs)/two.tsx`) are template code. The scaffold tabs were replaced in COR-73 | [architecture.md](architecture.md#2-module-map) | Untracked |
 | 15 | `app.json` has no `ios.bundleIdentifier` / `android.package` | EAS builds and store submission need them | `mobile/app.json` | Untracked (release work, COR-87) |
 | 16 | No component tests; the 100 % coverage gate covers `lib/schedule`, `lib/wizard`, `lib/today`, `lib/notifications` (not the Expo adapters), and `lib/storage/{benchmark-access,database-file-scan,device-benchmark,diagnostics}.ts` | UI regressions are caught only by hand. The rest of storage (repository, mappers, vault) has tests but no coverage threshold | [development.md](development.md#testing) | Untracked |
-| 17 | UTC date slicing in the repository | `refillMedication` sets `inventory.lastRefilledAt` and demo seeding derives its `todayKey` with `new Date().toISOString().slice(0, 10)`, which is the **UTC** date: in a negative-offset zone it is already tomorrow in the evening (e.g. after 18:00 in Chicago in winter). The project rule is to use `toDateKey` from `lib/schedule/date-keys.ts`. `refillMedication` has no UI caller yet; COR-78's refill buttons will be the first | `lib/storage/context.ts` (`refillMedication`; `seedDemoVault` call and `createInitialSeedData` fallback) | Untracked |
+| 17 | ~~UTC date slicing in the repository~~ **Fixed** | `refillMedication` now takes `todayKey` and sets `lastRefilledAt` from it; both demo-seeding fallbacks use `toDateKey(new Date())` instead of `toISOString().slice(0, 10)`. Guarded by the civil-date boundary spec | `lib/storage/context.ts` | COR-78 |
 
 ## Where the web prototype fits
 
