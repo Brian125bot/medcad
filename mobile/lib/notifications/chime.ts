@@ -3,7 +3,7 @@
  *
  * Two sine tones with exponential decay and a short linear fade-out so the
  * file never clips or clicks. `scripts/generate-chime.ts` writes the result
- * to `assets/sounds/cadencerx-chime.wav`; a test asserts the committed file
+ * to `assets/sounds/cadencerx_chime.wav`; a test asserts the committed file
  * matches byte for byte.
  */
 

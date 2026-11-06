@@ -48,7 +48,7 @@ describe('chime', () => {
   it('is deterministic and matches the committed asset byte for byte', () => {
     const wav = synthesizeChimeWav();
     expect(synthesizeChimeWav()).toEqual(wav);
-    const committed = readFileSync(join(__dirname, '..', 'assets', 'sounds', 'cadencerx-chime.wav'));
+    const committed = readFileSync(join(__dirname, '..', 'assets', 'sounds', 'cadencerx_chime.wav'));
     expect(Buffer.from(wav).equals(committed)).toBe(true);
   });
 

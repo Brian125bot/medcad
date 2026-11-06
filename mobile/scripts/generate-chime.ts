@@ -6,6 +6,6 @@ import { join } from 'node:path';
 
 import { synthesizeChimeWav } from '../lib/notifications/chime';
 
-const target = join(__dirname, '..', 'assets', 'sounds', 'cadencerx-chime.wav');
+const target = join(__dirname, '..', 'assets', 'sounds', 'cadencerx_chime.wav');
 writeFileSync(target, synthesizeChimeWav());
 console.log(`wrote ${target}`);
