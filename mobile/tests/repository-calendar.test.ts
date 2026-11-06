@@ -136,6 +136,32 @@ async function main() {
   assert.strictEqual(unlinked.inventory.googleCalendarEventId, undefined);
   assert.strictEqual(unlinked.inventory.calendarSyncedFillDate, undefined);
 
+  // A save without a baseline (pause/resume) from a snapshot taken before the link keeps the link too.
+  const toggleSnapshot = med('m-toggle', { nextFillDate: '2026-11-30' });
+  await repository.saveMedication(toggleSnapshot);
+  await repository.recordCalendarSync('m-toggle', { googleCalendarEventId: 'evt-toggle', calendarSyncedFillDate: '2026-11-30' });
+  await repository.saveMedication({ ...toggleSnapshot, active: false });
+  const toggled = (await repository.getMedicationById('m-toggle'))!;
+  assert.strictEqual(toggled.active, false);
+  assert.strictEqual(toggled.inventory.googleCalendarEventId, 'evt-toggle');
+  assert.strictEqual(toggled.inventory.calendarSyncedFillDate, '2026-11-30');
+
+  // A delete racing a record, in either order: the record is refused or its link rides on the delete event.
+  for (const order of ['record-first', 'delete-first'] as const) {
+    const id = `m-race-${order}`;
+    await repository.saveMedication(med(id, { nextFillDate: '2026-11-25' }));
+    events.length = 0;
+    const record = () =>
+      repository.recordCalendarSync(id, { googleCalendarEventId: `evt-${order}`, calendarSyncedFillDate: '2026-11-25' });
+    const [recorded] =
+      order === 'record-first'
+        ? await Promise.all([record(), repository.deleteMedication(id)])
+        : await Promise.all([repository.deleteMedication(id).then(() => null), record()]).then(([, r]) => [r]);
+    const deleted = (events as RepositoryChange[]).find((e) => e.type === 'medication-deleted') as { googleCalendarEventId?: string };
+    assert.strictEqual(deleted.googleCalendarEventId, recorded ? `evt-${order}` : undefined, order);
+    assert.strictEqual(await repository.getMedicationById(id), null);
+  }
+
   // A throwing listener cannot fail a record (it emits nothing) or a delete.
   const warn = console.warn;
   console.warn = () => {};

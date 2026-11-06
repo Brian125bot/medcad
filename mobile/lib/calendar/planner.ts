@@ -19,6 +19,8 @@ export interface CalendarSyncPlanInput {
   tombstones: readonly string[];
   fingerprintChanged: boolean;
   forceAll: boolean;
+  /** Linked medications whose event text may be out of date (renamed while names are shown). */
+  forceMedicationIds?: ReadonlySet<string>;
   todayKey: string;
 }
 
@@ -42,7 +44,7 @@ export function planCalendarSync(input: CalendarSyncPlanInput): SyncOp[] {
     }
     if (fillDateKey < todayKey) continue;
     if (!eventId) creates.push({ kind: 'create', medicationId: med.id, fillDateKey });
-    else if (forceAll || fingerprintChanged || isCalendarEventStale(med.inventory)) {
+    else if (forceAll || fingerprintChanged || input.forceMedicationIds?.has(med.id) || isCalendarEventStale(med.inventory)) {
       updates.push({ kind: 'update', medicationId: med.id, eventId, fillDateKey });
     }
   }

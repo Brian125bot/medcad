@@ -172,6 +172,86 @@ describe('CalendarSyncEngine passes', () => {
     expect(repository.prefs.get(PREF_CALENDAR_TOMBSTONES)).toBeUndefined();
   });
 
+  it('an inserted event whose link cannot be stored is deleted remotely, so the retry makes no duplicate', async () => {
+    const { engine, api, repository } = setup({ meds: [calMed('a')] });
+    repository.onRecord = () => {
+      repository.onRecord = undefined;
+      throw new Error('disk full');
+    };
+    expect((await engine.syncNow()).state).toBe('error');
+    expect(api.count('insertEvent')).toBe(1);
+    expect(api.count('deleteEvent')).toBe(1);
+    expect(api.events.size).toBe(0);
+    await engine.syncNow();
+    expect(api.events.size).toBe(1);
+    expect(repository.meds.get('a')!.inventory.googleCalendarEventId).toBe([...api.events.keys()][0]);
+  });
+
+  it('if that remote delete also fails, the unrecorded event is tombstoned and drained later', async () => {
+    const { engine, api, repository } = setup({ meds: [calMed('a')] });
+    repository.onRecord = () => {
+      repository.onRecord = undefined;
+      throw new Error('disk full');
+    };
+    api.failOn('deleteEvent', new CalendarNetworkError());
+    await engine.syncNow();
+    const orphan = (api.calls.find((c) => c.method === 'deleteEvent')!.args[1]) as string;
+    expect(repository.prefs.get(PREF_CALENDAR_TOMBSTONES)).toEqual([orphan]);
+    await engine.syncNow();
+    expect(api.events.has(orphan)).toBe(false);
+    expect(repository.prefs.get(PREF_CALENDAR_TOMBSTONES)).toEqual([]);
+    expect(api.events.size).toBe(1);
+  });
+
+  it('a failed record after an in-place update deletes nothing (the stored link still points at it)', async () => {
+    const { engine, api, repository } = setup({
+      meds: [calMed('a', {}, { googleCalendarEventId: 'live', calendarSyncedFillDate: '2026-11-01' })],
+      account: new FakeAccount('cal-x'),
+    });
+    api.calendars.add('cal-x');
+    api.events.set('live', { calendarId: 'cal-x', body: {} as never });
+    repository.onRecord = () => {
+      repository.onRecord = undefined;
+      throw new Error('disk full');
+    };
+    expect((await engine.syncNow()).state).toBe('error');
+    expect(api.count('deleteEvent')).toBe(0);
+    expect(api.events.has('live')).toBe(true);
+  });
+
+  it('a rename while names are shown updates that event only; with names off a save patches nothing', async () => {
+    const { engine, api, repository } = setup({ meds: [calMed('a', { name: 'Fakeprofen' }), calMed('b', { name: 'Testamine' })] });
+    repository.prefs.set(PREF_CALENDAR_SHOW_MEDICATION_NAMES, true);
+    engine.start();
+    await engine.syncNow();
+    const eventA = repository.meds.get('a')!.inventory.googleCalendarEventId!;
+    repository.save({ ...repository.meds.get('a')!, name: 'Fakeprofen XR' });
+    await engine.syncNow();
+    expect(api.count('updateEvent')).toBe(1);
+    expect(api.events.get(eventA)!.body.summary).toBe('Refill: Fakeprofen XR');
+    repository.prefs.set(PREF_CALENDAR_SHOW_MEDICATION_NAMES, false);
+    await engine.syncNow(); // fingerprint change updates both once
+    const updates = api.count('updateEvent');
+    repository.save({ ...repository.meds.get('b')!, name: 'Testamine 2' });
+    await engine.syncNow();
+    expect(api.count('updateEvent')).toBe(updates);
+    engine.stop();
+  });
+
+  it('a rename that could not sync is retried on the next pass', async () => {
+    const { engine, api, repository } = setup({ meds: [calMed('a', { name: 'Fakeprofen' })] });
+    repository.prefs.set(PREF_CALENDAR_SHOW_MEDICATION_NAMES, true);
+    engine.start();
+    await engine.syncNow();
+    const eventA = repository.meds.get('a')!.inventory.googleCalendarEventId!;
+    api.failOn('updateEvent', new CalendarNetworkError());
+    repository.save({ ...repository.meds.get('a')!, name: 'Fakeprofen XR' });
+    expect((await engine.syncNow()).state).toBe('offline');
+    await engine.syncNow();
+    expect(api.events.get(eventA)!.body.summary).toBe('Refill: Fakeprofen XR');
+    engine.stop();
+  });
+
   it('reports progress for every op and a throwing progress listener never escapes', async () => {
     const { engine, repository, logs } = setup({
       meds: [calMed('a'), calMed('b', {}, { googleCalendarEventId: 'e-b' })],

@@ -86,6 +86,7 @@ export class CalendarSyncEngine {
   private tombstoneChain: Promise<void> = Promise.resolve();
   private dirty = false;
   private pendingForceAll = false;
+  private pendingForceIds = new Set<string>();
   private pendingProgress: CalendarSyncProgressListener[] = [];
   private vaultWipePending = false;
 
@@ -135,7 +136,9 @@ export class CalendarSyncEngine {
       case 'vault-deleted':
         this.vaultWipePending = true;
         return this.trigger();
-      default:
+      case 'medication-saved':
+        // The save may be a rename: refresh its event text if names are shown.
+        this.pendingForceIds.add(change.medicationId);
         return this.trigger();
     }
   }
@@ -204,12 +207,15 @@ export class CalendarSyncEngine {
         this.pendingForceAll = false;
         const progress = this.pendingProgress;
         this.pendingProgress = [];
+        const forceIds = this.pendingForceIds;
+        this.pendingForceIds = new Set();
         try {
-          await this.runPass(forceAll, progress);
+          await this.runPass(forceAll, forceIds, progress);
         } catch (error) {
           this.log('[calendar] sync pass failed', error);
           this.publish({ ...this.status, state: 'error' });
         }
+        if (this.status.state !== 'ok') for (const id of forceIds) this.pendingForceIds.add(id);
       }
     } finally {
       this.running = null;
@@ -222,7 +228,11 @@ export class CalendarSyncEngine {
     return run;
   }
 
-  private async runPass(forceAll: boolean, progress: CalendarSyncProgressListener[]): Promise<void> {
+  private async runPass(
+    forceAll: boolean,
+    forceIds: ReadonlySet<string>,
+    progress: CalendarSyncProgressListener[],
+  ): Promise<void> {
     if (this.vaultWipePending) {
       this.vaultWipePending = false;
       await this.wipeRemote();
@@ -247,6 +257,7 @@ export class CalendarSyncEngine {
         tombstones,
         fingerprintChanged: storedFingerprint !== fingerprint,
         forceAll,
+        forceMedicationIds: settings.showMedicationNames ? forceIds : undefined,
         todayKey: clock.todayKey(),
       });
 
@@ -346,14 +357,30 @@ export class CalendarSyncEngine {
       inserted = true;
     }
     // Record the date this op carried: a newer nextFillDate stays stale and is updated next pass.
-    const recorded = await repository.recordCalendarSync(op.medicationId, {
-      googleCalendarEventId: eventId,
-      calendarSyncedFillDate: op.fillDateKey,
-    });
+    let recorded: boolean;
+    try {
+      recorded = await repository.recordCalendarSync(op.medicationId, {
+        googleCalendarEventId: eventId,
+        calendarSyncedFillDate: op.fillDateKey,
+      });
+    } catch (error) {
+      if (inserted) await this.discardUnrecordedEvent(calendarId, eventId);
+      throw error;
+    }
     if (!recorded && inserted) {
       // Deleted mid-flight: its delete event could not carry this new id.
       await this.updateTombstones((current) => addTombstone(current, eventId));
       this.dirty = true;
+    }
+  }
+
+  /** An inserted event whose link could not be stored would be orphaned: delete it, else tombstone it. */
+  private async discardUnrecordedEvent(calendarId: string, eventId: string): Promise<void> {
+    try {
+      await this.deps.api.deleteEvent(calendarId, eventId);
+    } catch (error) {
+      this.log('[calendar] unrecorded event delete failed', error);
+      await this.updateTombstones((current) => addTombstone(current, eventId));
     }
   }
 

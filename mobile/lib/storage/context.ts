@@ -686,7 +686,8 @@ export class MedicationRepository {
    * `inventoryBaseline` (the `currentUnits` they loaded): the stored stock is
    * then re-read under the write gate and only the user's own change
    * (`currentUnits - inventoryBaseline`) is applied on top, so doses logged
-   * while the editor was open are not overwritten (COR-95).
+   * while the editor was open are not overwritten (COR-95). Every save of an
+   * existing row keeps its stored calendar link (`recordCalendarSync` owns it).
    */
   public async saveMedication(
     med: import('../domain/medication-data').Medication,
@@ -696,26 +697,27 @@ export class MedicationRepository {
     const key = await this.getKey();
     const { domainMedicationToRows } = await import('./mappers');
     const { medicationRow, timeSlotRows } = domainMedicationToRows(med);
-    const write = async (driver: SqlOperations = this.platform.driver) => {
-      const baseline = options.inventoryBaseline;
-      if (baseline !== undefined) {
-        const latest = await this.getMedicationRow(med.id, driver);
-        if (latest) {
+    const write = async (driver: SqlOperations) => {
+      const latest = await this.getMedicationRow(med.id, driver);
+      if (latest) {
+        const inventory = { ...med.inventory };
+        const baseline = options.inventoryBaseline;
+        if (baseline !== undefined) {
           const userDelta = med.inventory.currentUnits - baseline;
           medicationRow.inventory_current = Math.max(0, latest.inventory_current + userDelta);
-          // Calendar fields are owned by `recordCalendarSync`: keep the stored link, not the editor's snapshot.
-          const stored = await decryptMedicationRow(this.platform.cipher, key, latest);
-          const storedEventId = latest.inventory_calendar_event_id || null;
-          const storedSyncedDate = typeof stored.calendar_synced_fill_date === 'string' ? stored.calendar_synced_fill_date : null;
-          medicationRow.inventory_calendar_event_id = storedEventId;
-          medicationRow.calendar_synced_fill_date = storedSyncedDate;
-          const inventory = { ...med.inventory, currentUnits: medicationRow.inventory_current };
-          delete inventory.googleCalendarEventId;
-          delete inventory.calendarSyncedFillDate;
-          if (storedEventId) inventory.googleCalendarEventId = storedEventId;
-          if (storedSyncedDate) inventory.calendarSyncedFillDate = storedSyncedDate;
-          med = { ...med, inventory };
+          inventory.currentUnits = medicationRow.inventory_current;
         }
+        // Calendar fields are owned by `recordCalendarSync`: keep the stored link, not the caller's snapshot.
+        const stored = await decryptMedicationRow(this.platform.cipher, key, latest);
+        const storedEventId = latest.inventory_calendar_event_id || null;
+        const storedSyncedDate = typeof stored.calendar_synced_fill_date === 'string' ? stored.calendar_synced_fill_date : null;
+        medicationRow.inventory_calendar_event_id = storedEventId;
+        medicationRow.calendar_synced_fill_date = storedSyncedDate;
+        delete inventory.googleCalendarEventId;
+        delete inventory.calendarSyncedFillDate;
+        if (storedEventId) inventory.googleCalendarEventId = storedEventId;
+        if (storedSyncedDate) inventory.calendarSyncedFillDate = storedSyncedDate;
+        med = { ...med, inventory };
       }
       const existingSlots = await this.getTimeSlotRows(med.id, driver);
       const nextIds = new Set(timeSlotRows.map((slot) => slot.id));
@@ -730,8 +732,7 @@ export class MedicationRepository {
       );
       this.lastWriteLatencyMs = Math.round((performance.now() - startedAt) * 100) / 100;
     };
-    if (options.inventoryBaseline !== undefined) await this.platform.driver.runExclusive(write);
-    else await write();
+    await this.platform.driver.runExclusive(write);
     this.emitChange({ type: 'medication-saved', medicationId: med.id });
     return med;
   }
@@ -743,15 +744,19 @@ export class MedicationRepository {
    */
   public async deleteMedication(id: string): Promise<void> {
     await this.ensureReady();
-    const linked = await this.platform.driver.get<{ inventory_calendar_event_id: string | null }>(
-      'SELECT inventory_calendar_event_id FROM medications WHERE id = ?',
-      [id],
-    );
-    const googleCalendarEventId = linked?.inventory_calendar_event_id || undefined;
-    await this.platform.driver.transaction(async (driver) => {
-      await driver.run('DELETE FROM dose_logs WHERE medication_id = ? AND date_key > ?', [id, toDateKey(new Date())]);
-      await driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
-      await driver.run('DELETE FROM medications WHERE id = ?', [id]);
+    let googleCalendarEventId: string | undefined;
+    // Read the link under the same gate as `recordCalendarSync`, so a link recorded just before the delete is carried.
+    await this.platform.driver.runExclusive(async (exclusive) => {
+      await exclusive.transaction(async (driver) => {
+        const linked = await driver.get<{ inventory_calendar_event_id: string | null }>(
+          'SELECT inventory_calendar_event_id FROM medications WHERE id = ?',
+          [id],
+        );
+        googleCalendarEventId = linked?.inventory_calendar_event_id || undefined;
+        await driver.run('DELETE FROM dose_logs WHERE medication_id = ? AND date_key > ?', [id, toDateKey(new Date())]);
+        await driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
+        await driver.run('DELETE FROM medications WHERE id = ?', [id]);
+      });
     });
     this.emitChange({
       type: 'medication-deleted',

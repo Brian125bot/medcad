@@ -190,9 +190,9 @@ async function main() {
     assert.strictEqual(isCalendarEventStale(refilledFill.inventory), true, 'linked event is stale after the date moves');
 
     const fillNow = (await repository.getMedicationById('med-fill'))!;
-    await repository.saveMedication({
-      ...fillNow,
-      inventory: { ...fillNow.inventory, calendarSyncedFillDate: fillNow.inventory.nextFillDate },
+    await repository.recordCalendarSync('med-fill', {
+      googleCalendarEventId: fillNow.inventory.googleCalendarEventId!,
+      calendarSyncedFillDate: fillNow.inventory.nextFillDate!,
     });
     assert.strictEqual(isCalendarEventStale((await repository.getMedicationById('med-fill'))!.inventory), false);
 

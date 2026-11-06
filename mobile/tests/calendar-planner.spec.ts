@@ -48,6 +48,16 @@ describe('planCalendarSync', () => {
     expect(planCalendarSync(base({ medications: [fresh], forceAll: true }))).toEqual([update]);
   });
 
+  it('forceMedicationIds updates only those linked medications', () => {
+    const a = calMed('a', {}, { googleCalendarEventId: 'e-a', calendarSyncedFillDate: '2026-11-20' });
+    const b = calMed('b', {}, { googleCalendarEventId: 'e-b', calendarSyncedFillDate: '2026-11-20' });
+    const c = calMed('c');
+    expect(planCalendarSync(base({ medications: [a, b, c], forceMedicationIds: new Set(['b', 'c']) }))).toEqual([
+      { kind: 'update', medicationId: 'b', eventId: 'e-b', fillDateKey: '2026-11-20' },
+      { kind: 'create', medicationId: 'c', fillDateKey: '2026-11-20' },
+    ]);
+  });
+
   it('paused or cleared-date linked medications are removed; unlinked ones make no op', () => {
     const paused = calMed('p', { active: false }, { googleCalendarEventId: 'e-p' });
     const cleared = calMed('c', {}, { nextFillDate: undefined, googleCalendarEventId: 'e-c' });

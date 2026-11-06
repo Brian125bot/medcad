@@ -86,13 +86,29 @@ not a re-read date. If `nextFillDate` changes while the request is in flight,
 the marker stays behind, `isCalendarEventStale` is true, and the edit's
 `medication-saved` event runs another pass that updates the event.
 
-Editor saves that pass `inventoryBaseline` (wizard edit, reminder settings,
-refill) keep the **stored** calendar fields instead of the editor's snapshot,
-so a sync that linked an event while the editor was open is not unlinked (which
-would make a duplicate event on the next pass).
+Every `saveMedication` of an existing row (wizard edit, reminder settings,
+refill, pause/resume) re-reads the row under the write gate and keeps the
+**stored** calendar fields instead of the caller's snapshot, so a sync that
+linked an event while an editor was open is not unlinked (which would make a
+duplicate event on the next pass). `recordCalendarSync` is the only writer of
+those fields after a row exists.
 
-If a medication is deleted between an insert and its record, the new event id
-is tombstoned and removed on the next pass.
+`deleteMedication` reads the event id inside the same gate, so a link recorded
+just before the delete rides on the `medication-deleted` event. If a
+medication is deleted between an insert and its record instead, the record
+returns `false` and the engine tombstones the new event itself.
+
+If the record **throws** after an insert (storage error), the engine deletes
+the new event remotely before failing the pass; if that delete fails too, it
+tombstones the id. Only a process kill between the insert response and the
+record can still orphan an event (see part 2: client-chosen event ids).
+
+## Renames
+
+The fingerprint covers settings, not per-medication text. Every
+`medication-saved` adds its id to a pending set; while names are shown, the
+next pass updates those linked events (one patch per saved medication). With
+names off the set is ignored. The set is kept until a pass ends `ok`.
 
 ## Fingerprint
 
