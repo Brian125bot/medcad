@@ -121,6 +121,13 @@ export class ReminderEngine {
     for (const listener of [...this.statusListeners]) listener();
   }
 
+  private async cancelDoseNamespace(): Promise<void> {
+    const { scheduler } = this.deps;
+    for (const entry of await scheduler.listScheduled()) {
+      if (entry.id.startsWith(DOSE_NAMESPACE)) await scheduler.cancel(entry.id);
+    }
+  }
+
   private async cancelDoseAndSnoozeNamespaces(): Promise<void> {
     const { scheduler } = this.deps;
     for (const entry of await scheduler.listScheduled()) {
@@ -149,6 +156,9 @@ export class ReminderEngine {
           repository.getDoseLogsInRange(now.todayKey, now.todayKey),
         ]);
         const todayLogs = Object.fromEntries(todayEntries.map((entry) => [entry.key, entry]));
+        // Grant → schedule → revoke must not leave OS entries while the UI
+        // reports zero scheduled (COR-98). Snoozes are a different namespace.
+        await this.cancelDoseNamespace();
         await scheduler.setBadgeCount(computeTodayPendingBadgeCount(medications, todayLogs, now.todayKey));
         this.setStatus({ state: 'permission-denied', lastReconciledAt: clock.nowIso(), scheduledCount: 0, truncated: false });
         return;

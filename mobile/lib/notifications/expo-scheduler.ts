@@ -100,7 +100,10 @@ export function createExpoScheduler(): NotificationSchedulerPort {
           title: content.title,
           body: content.body,
           data: data as unknown as Record<string, unknown>,
-          categoryIdentifier: content.categoryIdentifier ?? DOSE_REMINDER_CATEGORY,
+          // Only real dose reminders (and snoozes, which set this themselves)
+          // get Take / Snooze / Skip. Sentinel and window-end content omit the
+          // category; do not default it to dose_reminder (COR-99).
+          ...(content.categoryIdentifier ? { categoryIdentifier: content.categoryIdentifier } : {}),
           // iOS plays this file (or nothing); Android uses the channel's sound.
           sound: content.sound ? CHIME_SOUND_FILE : false,
           ...(content.vibrate ? { vibrate: VIBRATION_PATTERN } : {}),

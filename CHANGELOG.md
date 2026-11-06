@@ -25,6 +25,16 @@ the issue id and PR number where there are any.
 
 ## [Unreleased]
 
+### Fixed
+- **[mobile]** Permission revoke cancels scheduled `cx.dose.*` reminders (COR-98).
+  After grant → schedule → revoke, `ReminderEngine` no longer returns while OS
+  entries remain and the status says `scheduledCount: 0`. `cx.snooze.*` is left
+  in place. *(COR-98)*
+- **[mobile]** Sentinel and window-end reminders no longer default to the
+  `dose_reminder` category, so they do not show Take / Snooze / Skip (COR-99).
+  `hashReminderContent` includes `categoryIdentifier`, so reminders scheduled
+  before this pick up the category change on the next reconcile. *(COR-99)*
+
 ### Added
 - **[mobile]** COR-77 interactive lock-screen dose actions (not
   device-tested): `dose_reminder` category with Take, Snooze 15m, and Skip;
