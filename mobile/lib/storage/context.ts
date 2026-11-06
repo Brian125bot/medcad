@@ -356,7 +356,7 @@ interface KeyringState {
  */
 export type RepositoryChange =
   | { type: 'medication-saved'; medicationId: string }
-  | { type: 'medication-deleted'; medicationId: string }
+  | { type: 'medication-deleted'; medicationId: string; googleCalendarEventId?: string }
   | { type: 'dose-changed'; dateKey: string; medicationId: string; slotId: string }
   | { type: 'preference-changed'; prefKey: string }
   | { type: 'vault-deleted' };
@@ -703,7 +703,18 @@ export class MedicationRepository {
         if (latest) {
           const userDelta = med.inventory.currentUnits - baseline;
           medicationRow.inventory_current = Math.max(0, latest.inventory_current + userDelta);
-          med = { ...med, inventory: { ...med.inventory, currentUnits: medicationRow.inventory_current } };
+          // Calendar fields are owned by `recordCalendarSync`: keep the stored link, not the editor's snapshot.
+          const stored = await decryptMedicationRow(this.platform.cipher, key, latest);
+          const storedEventId = latest.inventory_calendar_event_id || null;
+          const storedSyncedDate = typeof stored.calendar_synced_fill_date === 'string' ? stored.calendar_synced_fill_date : null;
+          medicationRow.inventory_calendar_event_id = storedEventId;
+          medicationRow.calendar_synced_fill_date = storedSyncedDate;
+          const inventory = { ...med.inventory, currentUnits: medicationRow.inventory_current };
+          delete inventory.googleCalendarEventId;
+          delete inventory.calendarSyncedFillDate;
+          if (storedEventId) inventory.googleCalendarEventId = storedEventId;
+          if (storedSyncedDate) inventory.calendarSyncedFillDate = storedSyncedDate;
+          med = { ...med, inventory };
         }
       }
       const existingSlots = await this.getTimeSlotRows(med.id, driver);
@@ -732,12 +743,51 @@ export class MedicationRepository {
    */
   public async deleteMedication(id: string): Promise<void> {
     await this.ensureReady();
+    const linked = await this.platform.driver.get<{ inventory_calendar_event_id: string | null }>(
+      'SELECT inventory_calendar_event_id FROM medications WHERE id = ?',
+      [id],
+    );
+    const googleCalendarEventId = linked?.inventory_calendar_event_id || undefined;
     await this.platform.driver.transaction(async (driver) => {
       await driver.run('DELETE FROM dose_logs WHERE medication_id = ? AND date_key > ?', [id, toDateKey(new Date())]);
       await driver.run('DELETE FROM time_slots WHERE medication_id = ?', [id]);
       await driver.run('DELETE FROM medications WHERE id = ?', [id]);
     });
-    this.emitChange({ type: 'medication-deleted', medicationId: id });
+    this.emitChange({
+      type: 'medication-deleted',
+      medicationId: id,
+      ...(googleCalendarEventId ? { googleCalendarEventId } : {}),
+    });
+  }
+
+  /**
+   * Records a calendar sync result: only `inventory_calendar_event_id` and the
+   * sealed `calendar_synced_fill_date` change (`null` clears). Re-reads the row
+   * under the write gate, so stock and every other field stay as stored.
+   * Emits no change event. Returns false when the medication no longer exists.
+   */
+  public async recordCalendarSync(
+    medicationId: string,
+    result: { googleCalendarEventId: string | null; calendarSyncedFillDate: string | null },
+  ): Promise<boolean> {
+    const { googleCalendarEventId, calendarSyncedFillDate } = result;
+    if (calendarSyncedFillDate !== null && !isValidDateKey(calendarSyncedFillDate)) {
+      throw new RangeError(`Invalid calendar synced date key: ${calendarSyncedFillDate}`);
+    }
+    await this.ensureReady();
+    const key = await this.getKey();
+    return this.platform.driver.runExclusive(async (driver) => {
+      const row = await this.getMedicationRow(medicationId, driver);
+      if (!row) return false;
+      const phi = await openJson<Record<string, unknown>>(this.platform.cipher, key, row.enc_payload);
+      const sealed = await sealJson(this.platform.cipher, key, { ...phi, calendar_synced_fill_date: calendarSyncedFillDate });
+      await driver.run('UPDATE medications SET inventory_calendar_event_id = ?, enc_payload = ? WHERE id = ?', [
+        googleCalendarEventId,
+        sealed,
+        medicationId,
+      ]);
+      return true;
+    });
   }
 
   public async toggleActiveMedication(id: string, todayKey: string) {
