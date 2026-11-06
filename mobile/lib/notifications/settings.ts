@@ -64,6 +64,25 @@ export function withAlert(med: Medication, patch: Partial<MedicationAlert>): Med
   return { ...med, alert: { ...getMedicationAlert(med), ...patch } };
 }
 
+/**
+ * Chip values for the lead-time picker: optional `null` (inherit default), the
+ * standard options, plus the stored value when it is not a standard option
+ * (e.g. 20 min set in the wizard) so the control shows what is saved.
+ */
+export function leadChipOptions(value: number | null | 'mixed', allowDefault: boolean): (number | null)[] {
+  const minutes = [...LEAD_TIME_OPTIONS];
+  if (typeof value === 'number' && !minutes.includes(value)) {
+    minutes.push(value);
+    minutes.sort((a, b) => a - b);
+  }
+  return allowDefault ? [null, ...minutes] : minutes;
+}
+
+/** Short chip text; `formatLeadMinutes` is the accessible label. */
+export function leadChipLabel(minutes: number): string {
+  return minutes === 0 ? 'At time' : `${minutes} min`;
+}
+
 export function formatLeadMinutes(minutes: number): string {
   return minutes === 0 ? 'At dose time' : `${minutes} min before`;
 }

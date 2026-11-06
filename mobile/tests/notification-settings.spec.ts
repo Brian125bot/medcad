@@ -12,7 +12,7 @@ import {
   summarizeLeadMinutes,
   withAlert,
   withLeadMinutes,
-} from '../lib/notifications/settings';
+ leadChipLabel, leadChipOptions } from '../lib/notifications/settings';
 import { makeMed } from './notification-fixtures';
 
 function prefs(values: Record<string, unknown>) {
@@ -69,5 +69,28 @@ describe('alert edits', () => {
     const quiet = withAlert(makeMed(), { sound: false });
     expect(quiet.alert).toEqual({ sound: false, vibrate: true });
     expect(withAlert(quiet, { vibrate: false }).alert).toEqual({ sound: false, vibrate: false });
+  });
+});
+
+describe('leadChipOptions', () => {
+  it('lists the standard options, with a leading default when allowed', () => {
+    expect(leadChipOptions(10, false)).toEqual([0, 5, 10, 15, 30, 60]);
+    expect(leadChipOptions(null, true)).toEqual([null, 0, 5, 10, 15, 30, 60]);
+    expect(leadChipOptions('mixed', true)).toEqual([null, 0, 5, 10, 15, 30, 60]);
+  });
+
+  it('adds a stored non-standard lead time in order so it shows as selected', () => {
+    expect(leadChipOptions(20, false)).toEqual([0, 5, 10, 15, 20, 30, 60]);
+    expect(leadChipOptions(90, true)).toEqual([null, 0, 5, 10, 15, 30, 60, 90]);
+  });
+
+  it('does not mutate the shared options', () => {
+    leadChipOptions(20, false);
+    expect(leadChipOptions(null, false)).toEqual([0, 5, 10, 15, 30, 60]);
+  });
+
+  it('labels chips briefly', () => {
+    expect(leadChipLabel(0)).toBe('At time');
+    expect(leadChipLabel(20)).toBe('20 min');
   });
 });
