@@ -4,15 +4,21 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { executeNotificationAction, type ActionExecutorDeps } from './action-executor';
+import { executeNotificationAction } from './action-executor';
 import {
   resolveNotificationResponseContext,
   type NotificationResponseContext,
 } from './notification-response-context';
-import { toExactAlarmStatus } from './exact-alarm';
-import { canScheduleExactAlarms } from './expo-exact-alarm';
 import { createExpoPermissions, createExpoScheduler } from './expo-scheduler';
 import { expoClock } from './expo-clock';
+import {
+  hasHandled,
+  normalizeDeliveredAtMs,
+  parseHandledStore,
+  PREF_HANDLED_ACTION_RESPONSES,
+  recordHandled,
+  responseKey,
+} from './response-dedupe';
 import {
   ACTION_SKIP_DOSE,
   ACTION_SNOOZE_15M,
@@ -23,11 +29,17 @@ import {
 } from './types';
 
 let processing: Promise<void> | null = null;
+const handledInProcess = new Set<string>();
 
 export {
   setNotificationResponseContextProvider,
   wireNotificationResponseContext,
 } from './notification-response-context';
+
+/** @internal */
+export function resetHandledInProcessForTests(): void {
+  handledInProcess.clear();
+}
 
 const ACTION_IDS = new Set([ACTION_TAKE_DOSE, ACTION_SNOOZE_15M, ACTION_SKIP_DOSE]);
 
@@ -35,12 +47,12 @@ function isReminderNotification(id: string): boolean {
   return id.startsWith(DOSE_NAMESPACE) || id.startsWith(SNOOZE_NAMESPACE);
 }
 
-function buildDeps(context: NotificationResponseContext): ActionExecutorDeps {
+function buildDeps(context: NotificationResponseContext) {
   return {
     repository: context.repository,
     scheduler: createExpoScheduler(),
     clock: expoClock,
-    log: (message, error) => console.warn(message, error),
+    log: (message: string, error: unknown) => console.warn(message, error),
   };
 }
 
@@ -58,15 +70,40 @@ export async function dispatchNotificationResponse(response: Notifications.Notif
   if (!isReminderNotification(id)) return;
   if (!ACTION_IDS.has(actionIdentifier)) return;
 
+  const dedupeKey = responseKey({
+    notificationId: id,
+    actionIdentifier,
+    deliveredAtMs: normalizeDeliveredAtMs(notification.date),
+  });
+
   const run = async () => {
-    const exact = await exactFlag();
-    await executeNotificationAction(
-      buildDeps(context),
-      actionIdentifier,
-      notification.request.content.data,
-      id,
-      { exact },
+    if (handledInProcess.has(dedupeKey)) return;
+    const store = parseHandledStore(
+      await context.repository.getPreference(PREF_HANDLED_ACTION_RESPONSES, []),
     );
+    if (hasHandled(store, dedupeKey)) return;
+
+    handledInProcess.add(dedupeKey);
+    let record = false;
+    try {
+      const exact = await exactFlag();
+      const outcome = await executeNotificationAction(
+        buildDeps(context),
+        actionIdentifier,
+        notification.request.content.data,
+        id,
+        { exact },
+      );
+      if (outcome === 'completed') record = true;
+      else if (outcome === 'failed' || outcome === 'malformed') handledInProcess.delete(dedupeKey);
+    } catch {
+      handledInProcess.delete(dedupeKey);
+      return;
+    }
+    if (record) {
+      const next = recordHandled(store, dedupeKey, Date.now());
+      await context.repository.setPreference(PREF_HANDLED_ACTION_RESPONSES, next);
+    }
   };
 
   processing = (processing ?? Promise.resolve()).then(run, run);
