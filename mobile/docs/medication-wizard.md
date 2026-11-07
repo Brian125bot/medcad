@@ -67,6 +67,13 @@ Each slot's **label** is derived from its time, not chosen:
 04:00–10:59 Morning · 11:00–15:59 Midday · 16:00–20:59 Evening ·
 21:00–03:59 Bedtime. Slots are saved **sorted by time**.
 
+**+ Add dose time** inserts a slot at the first *free* time
+(`addTimeSlot` / `nextAvailableTime` in `lib/wizard/medication-form.ts`):
+`08:00`, `20:00`, `12:00`, `22:00`, … skipping any time already used, and
+falling back to any free minute of the day. It used to insert a hard-coded
+`20:00`, which collided with the default second slot and blocked the save
+with *"This time is already used by another dose."* (COR-91).
+
 ### Inventory
 
 | Field | Rule |
@@ -144,11 +151,19 @@ These are current behaviours, not endorsements — several are tracked in the
   reminder engine reschedules; the wizard only asks for notification
   permission (on save with reminders on, or when a reminder switch is turned
   on). See [notifications.md](notifications.md).
+- **The wizard keeps the reminder sound / vibrate.** The wizard has no
+  sound/vibrate control, so `formToMedication` carries `alert` over from the
+  medication being edited, and the repository keeps the stored alert when a
+  caller does not carry one. Before COR-91 a wizard edit reset a medication's
+  "no sound" preference back to the default.
 - **No delete or pause UI.** `deleteMedication` and `toggleActiveMedication`
   exist on the repository but no screen calls them.
 - **Never validated on a device.** The iOS inline spinner / Android dialog
   behaviour of `NativePickerField` and the modal presentation are unverified on
-  hardware (COR-91).
+  hardware (COR-91). The run sheet is
+  [cor-91-device-run-package.md](cor-91-device-run-package.md); the wizard's
+  logic, its inventory rules and the encrypted-store round trip are covered on
+  every CI run by `tests/cor-91-wizard-device-qa.spec.ts`.
 
 ## Adding a field to a medication
 
@@ -181,6 +196,12 @@ A checklist, in the order that keeps the compiler on your side:
 
 `tests/wizard-medication-form.spec.ts` covers parsing, every validation rule,
 warnings, form ⇄ medication mapping (including edit round trips and corrupt
-stored values) and picker date conversion. **There are no component tests:**
-`MedicationWizard`, `NativePickerField` and `PillPreview` are exercised only by
-hand. Run with `npm run test:schedule` (vitest + coverage) or `npm test`.
+stored values) and picker date conversion.
+`tests/cor-91-wizard-device-qa.spec.ts` encodes the COR-91 device run sheet
+as assertions: each frequency with two dose times, the edit round trip
+(change / add / remove a slot, `29.5` units, `55` on a `30`-pack), the
+encrypted-store round trip across a simulated relaunch, the picker helpers,
+and a log-capture check that no medication detail is written to the console.
+**There are no component tests:** `MedicationWizard`, `NativePickerField` and
+`PillPreview` are exercised only by hand (and by the COR-91 device run). Run
+with `npm run test:schedule` (vitest + coverage) or `npm test`.
