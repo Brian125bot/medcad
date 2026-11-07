@@ -17,6 +17,7 @@ import type { Medication, ScheduleFrequency } from "@/lib/domain/medication-data
 import { ensureReminderPermission, maybePromptForExactAlarm } from "@/lib/notifications";
 import { toDateKey } from "@/lib/schedule/date-keys";
 import {
+  addTimeSlot,
   firstInvalidStep,
   formToMedication,
   inventoryWarnings,
@@ -236,7 +237,7 @@ export function MedicationWizard({ initial, existing, onSave, onCancel }: Props)
             {state.timeSlots.length < LIMITS.slotsMax && (
               <Pressable
                 accessibilityRole="button"
-                onPress={() => update({ timeSlots: [...state.timeSlots, { time: "20:00", doseUnits: "1", leadMinutes: "", reminderEnabled: true }] })}
+                onPress={() => update({ timeSlots: addTimeSlot(state.timeSlots) })}
                 className="items-center rounded-xl border border-dashed border-cadence-accent py-3"
               >
                 <Text className="font-semibold text-cadence-accent">+ Add dose time</Text>

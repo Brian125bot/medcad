@@ -56,6 +56,18 @@ the issue id and PR number where there are any.
   the calendar-sync ticket. *(COR-94)*
 
 ### Fixed
+- **[mobile]** The COR-75 wizard's **+ Add dose time** no longer inserts a
+  hard-coded `20:00`. It now picks the first free time (`08:00`, `20:00`,
+  `12:00`, … skipping taken times, then any free minute of the day), so
+  adding a third dose time cannot collide with the default second slot and
+  block the save with *"This time is already used by another dose."* Found by
+  the COR-91 desk review. *(COR-91, COR-75)*
+- **[mobile]** A wizard edit no longer resets a medication's COR-76 reminder
+  **sound / vibrate** preference. `formToMedication` carries `alert` over from
+  the medication being edited, and the repository keeps the stored alert when a
+  caller does not carry one, so editing a medication from the wizard can no
+  longer silently turn a "no sound" reminder back on. Found by the COR-91 desk
+  review. *(COR-91, COR-75)*
 - **[mobile]** Permission revoke cancels scheduled `cx.dose.*` reminders (COR-98).
   After grant → schedule → revoke, `ReminderEngine` no longer returns while OS
   entries remain and the status says `scheduledCount: 0`. `cx.snooze.*` is left
@@ -69,6 +81,17 @@ the issue id and PR number where there are any.
   longer overwritten. *(COR-78)*
 
 ### Added
+- **[mobile]** COR-91 device-QA harness and run sheet for the COR-75 wizard.
+  `tests/cor-91-wizard-device-qa.spec.ts` encodes the COR-91 test script as
+  assertions — each frequency with two dose times, the edit round trip (change
+  / add / remove a slot, `29.5` units on hand, `55` units on a `30`-pack warned
+  but saved), the encrypted-store round trip across a simulated relaunch, the
+  native picker date conversions, and a console capture that asserts no
+  medication detail is logged. `mobile/docs/cor-91-device-run-package.md` is
+  the run sheet for the physical iOS / Android run (wheels, keyboard, pill
+  preview, device logs), with the exact values to type and the evidence to
+  paste. No device numbers yet: the hardware run is still outstanding.
+  *(COR-91, COR-75)*
 - **[mobile]** COR-78 Cabinet tab: every medication with current units, a
   capacity supply bar, and days of supply remaining from the schedule-walking
   `estimateDaysOfSupplyRemaining`; amber low / red out badges; optimistic

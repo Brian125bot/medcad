@@ -135,6 +135,65 @@ export function parseInteger(value: string): number {
   return INTEGER_PATTERN.test(trimmed) ? Number(trimmed) : Number.NaN;
 }
 
+/**
+ * Preferred times for a newly added dose slot, in order. The wizard starts
+ * with a single 08:00 slot, so the first added slot lands on 20:00 (the
+ * previous hard-coded value) and later slots walk down the list. Any time
+ * already used by another slot is skipped, so "+ Add dose time" can never
+ * create a duplicate that fails validation (COR-91).
+ */
+export const NEW_SLOT_TIME_PREFERENCE: readonly string[] = [
+  '08:00',
+  '20:00',
+  '12:00',
+  '22:00',
+  '07:00',
+  '13:00',
+  '19:00',
+  '21:00',
+  '17:00',
+  '23:00',
+  '09:00',
+  '18:00',
+];
+
+/**
+ * First `HH:mm` that is not already used by another dose slot. Falls back to
+ * any free minute of the day, so it always succeeds for the 12 slots the
+ * wizard allows.
+ */
+export function nextAvailableTime(existingTimes: readonly string[]): string {
+  const taken = new Set(existingTimes);
+  for (const candidate of NEW_SLOT_TIME_PREFERENCE) {
+    if (!taken.has(candidate)) return candidate;
+  }
+  for (let minutes = 0; minutes < 24 * 60; minutes += 1) {
+    const candidate = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  throw new RangeError('No free dose time is left.');
+}
+
+/**
+ * Appends a dose slot at a time that is free, keeping the slot list valid.
+ * The wizard's "+ Add dose time" button uses this so a new slot can never
+ * collide with an existing time and block the save (COR-91).
+ */
+export function addTimeSlot(slots: readonly TimeSlotDraft[]): TimeSlotDraft[] {
+  if (slots.length >= LIMITS.slotsMax) {
+    throw new RangeError(`No more than ${LIMITS.slotsMax} dose times.`);
+  }
+  return [
+    ...slots,
+    {
+      time: nextAvailableTime(slots.map((slot) => slot.time)),
+      doseUnits: '1',
+      leadMinutes: '',
+      reminderEnabled: true,
+    },
+  ];
+}
+
 /** Maps a HH:mm time to the time-of-day block used for slot labels. */
 export function timeToBlock(time: string): TimeOfDayBlock {
   const hour = Number(time.slice(0, 2));
@@ -382,6 +441,9 @@ export function formToMedication(state: MedicationFormState, options: FormToMedi
   };
   if (genericName) med.genericName = genericName;
   if (existing?.prescriber) med.prescriber = existing.prescriber;
+  // The wizard has no sound / vibrate control, so the COR-76 reminder
+  // preference is carried over untouched; saving must not reset it (COR-91).
+  if (existing?.alert) med.alert = { ...existing.alert };
   if (state.frequency === 'specific_days') med.daysOfWeek = [...new Set(state.daysOfWeek)].sort((a, b) => a - b);
   if (state.frequency === 'interval') med.intervalDays = parseInteger(state.intervalDays);
   if (pharmacyNote) med.inventory.pharmacyNote = pharmacyNote;

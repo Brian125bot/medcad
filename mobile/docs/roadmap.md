@@ -41,7 +41,7 @@ Points are Linear estimates. "Done" means closed in Linear.
 | COR-75 | Add / edit medication wizard with pill builder | 5 | **Done** | PR #7 |
 | COR-89 | Persist pill shape and colours (schema v2 migration) | 3 | **Done** | Delivered by PR #8 (appearance in the encrypted payload, no migration) — see below |
 | COR-90 | Restore the missing SpaceMono font | 1 | **Done** | `SpaceMono-Regular.ttf` + OFL in `assets/fonts/` |
-| COR-91 | Device QA of the COR-75 wizard | 1 | Backlog | Unblocked by COR-90 |
+| COR-91 | Device QA of the COR-75 wizard | 1 | **In Progress** | Desk verification done; two defects found and fixed in PR #33 (references COR-75) — "+ Add dose time" inserted a colliding `20:00` that blocked the save, and a wizard edit reset the medication's reminder sound / vibrate. Automated harness `mobile/tests/cor-91-wizard-device-qa.spec.ts`; run sheet [cor-91-device-run-package.md](cor-91-device-run-package.md). **No device evidence yet** — the physical iOS + Android run is outstanding |
 | COR-93 | Handle `dose_logs` for slots removed in edit | 2 | **Done** (PR #18, `aa496fc`) | Past logs kept as history with an encrypted `slotSnapshot`; counted by analytics; future-dated logs removed |
 | COR-95 | Editor save overwrites stock logged on Today | – | **Done** | `9e2d6db`; was gap 6 |
 | COR-96 | Undo refunds current slot dose, not units taken | – | **Done** | `b5aefbd`; was gap 4 |

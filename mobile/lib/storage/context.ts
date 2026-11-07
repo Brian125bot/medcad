@@ -2,7 +2,7 @@ import type { CipherPort, SecureKeyStore, SqlDriver, SqlOperations } from './por
 import type { MedicationRow, TimeSlotRow, DoseLogRow, UserPreferenceRow, SchemaVersionRecord } from './schema';
 import { CURRENT_DATABASE_SCHEMA_VERSION, DATABASE_NAME, DDL_STATEMENTS } from './schema';
 import type { DoseSlotSnapshot, TimeSlot } from '../domain/medication-data';
-import { isDoseSlotSnapshot, toDoseSlotSnapshot } from '../domain/medication-data';
+import { isDoseSlotSnapshot, isMedicationAlert, toDoseSlotSnapshot } from '../domain/medication-data';
 import { isValidDateKey, toDateKey } from '../schedule/date-keys';
 import { refreshNextFillDate } from '../schedule/fill-date';
 import { MAX_REFILL_UNITS } from '../schedule/supply';
@@ -713,6 +713,12 @@ export class MedicationRepository {
         const storedSyncedDate = typeof stored.calendar_synced_fill_date === 'string' ? stored.calendar_synced_fill_date : null;
         medicationRow.inventory_calendar_event_id = storedEventId;
         medicationRow.calendar_synced_fill_date = storedSyncedDate;
+        // The reminder alert (COR-76) is owned by the reminder settings screen:
+        // keep the stored preference when the caller did not carry one, so a
+        // save from a screen without that control cannot reset it (COR-91).
+        if (!isMedicationAlert(medicationRow.alert) && isMedicationAlert(stored.alert)) {
+          medicationRow.alert = { sound: stored.alert.sound, vibrate: stored.alert.vibrate };
+        }
         delete inventory.googleCalendarEventId;
         delete inventory.calendarSyncedFillDate;
         if (storedEventId) inventory.googleCalendarEventId = storedEventId;
